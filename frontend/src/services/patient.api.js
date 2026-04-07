@@ -22,7 +22,7 @@ const patientApi = {
         return res.data;
     },
     sendOtp: async (phone) => {
-        const res = await api.post("/otp/send-otp", { phone });
+        const res = await api.post("/otp/send-otp", { phone }, { timeout: 45000 });
         return res.data;
     },
     verifyOtp: async (phone, otp, idToken) => {

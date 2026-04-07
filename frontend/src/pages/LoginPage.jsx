@@ -38,7 +38,11 @@ function LoginPage() {
             console.log("OTP initialization request sent to backend");
         } catch (err) {
             console.error("Backend OTP Send Error:", err)
-            alert(err.response?.data?.error || "Failed to send access code. Please verify your number or check connection.")
+            if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
+                alert("OTP request is taking longer than expected. Please wait a few seconds and check your SMS before retrying.")
+            } else {
+                alert(err.response?.data?.error || "Failed to send access code. Please verify your number or check connection.")
+            }
         } finally {
             setLoading(false)
         }
