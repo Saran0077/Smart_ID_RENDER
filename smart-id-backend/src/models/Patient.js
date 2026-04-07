@@ -88,7 +88,14 @@ const patientSchema = new mongoose.Schema(
       {
         condition: String,
         diagnosedDate: Date,
-        notes: String
+        notes: String,
+        doctorName: String,
+        doctorId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User'
+        },
+        hospitalName: String,
+        recordedByRole: String
       }
     ],
 

@@ -4,7 +4,21 @@ import crypto from "crypto";
 import LoginAudit from "../models/LoginAudit.js";
 import Patient from "../models/Patient.js";
 import { emitToPatient, emitToMedicalStaff } from "../config/socket.js";
-import smsService from "../utils/smsService.js";
+import smsService, { SMS_PROVIDERS } from "../utils/smsService.js";
+
+const normalizePhone = (phone) => `${phone || ""}`.trim();
+
+const buildOtpPurpose = ({ purpose = "login", isNominee = false, patientId, phone }) => {
+    if (isNominee) {
+        return `nominee_${patientId}`;
+    }
+
+    if (purpose === "login") {
+        return `login_${phone}`;
+    }
+
+    return `consent_${patientId || phone}`;
+};
 
 // Timing-safe OTP comparison to prevent timing attacks
 const safeCompareOTP = (inputOtp, storedOtp) => {
@@ -33,9 +47,8 @@ export const sendOtp = async (req, res) => {
             });
         }
 
-        let finalPhone = phone;
+        let finalPhone = normalizePhone(phone);
         let nomineeName = null;
-        let nomineePhone = null;
         let patientName = null;
 
         // If nominee OTP requested, fetch nominee details from patient record
@@ -57,7 +70,18 @@ export const sendOtp = async (req, res) => {
 
             finalPhone = patient.emergencyContact.phone;
             nomineeName = patient.emergencyContact.name || 'Nominee';
-            nomineePhone = patient.emergencyContact.phone;
+            patientName = patient.fullName;
+        }
+
+        if (!isNominee && purpose === 'login') {
+            const patient = await Patient.findOne({ phone: finalPhone }).select('_id fullName');
+
+            if (!patient) {
+                return res.status(404).json({
+                    error: "No patient account is linked to this phone number"
+                });
+            }
+
             patientName = patient.fullName;
         }
 
@@ -78,10 +102,10 @@ export const sendOtp = async (req, res) => {
         const expires = new Date(Date.now() + 5 * 60 * 1000);
 
         // Save to Database with purpose to separate login vs consent OTPs
-        const consentPurpose = isNominee ? `nominee_${patientId}` : `consent_${patientId || phone}`;
+        const otpPurpose = buildOtpPurpose({ purpose, isNominee, patientId, phone: finalPhone });
         
         await Otp.findOneAndUpdate(
-            { phone: finalPhone, purpose: consentPurpose },
+            { phone: finalPhone, purpose: otpPurpose },
             { otp, expiresAt: expires, attempts: 0, createdAt: new Date() },
             { upsert: true }
         );
@@ -97,6 +121,23 @@ export const sendOtp = async (req, res) => {
         } catch (smsError) {
             console.error('SMS send failed:', smsError.message);
             console.warn('OTP generated but SMS delivery failed. OTP:', otp);
+
+            await LoginAudit.create({
+                phone: finalPhone,
+                isNominee,
+                nomineeName: nomineeName || null,
+                patientName: patientName || null,
+                patientId: patientId || null,
+                ip: req.ip,
+                userAgent: req.headers["user-agent"],
+                status: "OTP_FAILED"
+            });
+
+            if (smsService.provider !== SMS_PROVIDERS.CONSOLE) {
+                return res.status(502).json({
+                    error: isNominee ? "Failed to deliver nominee OTP" : "Failed to deliver OTP"
+                });
+            }
         }
 
         // Record Audit Event
@@ -154,14 +195,16 @@ export const verifyOtp = async (req, res) => {
     const { phone, otp, purpose = 'login', isNominee = false, patientId } = req.body;
 
     try {
-        if (!phone || !otp) {
+        const normalizedPhone = normalizePhone(phone);
+
+        if (!normalizedPhone || !otp) {
             return res.status(400).json({ error: "Phone number and OTP are required" });
         }
 
         // Determine the purpose for lookup
-        const consentPurpose = isNominee ? `nominee_${patientId}` : `consent_${patientId || phone}`;
+        const otpPurpose = buildOtpPurpose({ purpose, isNominee, patientId, phone: normalizedPhone });
         
-        const record = await Otp.findOne({ phone, purpose: consentPurpose });
+        const record = await Otp.findOne({ phone: normalizedPhone, purpose: otpPurpose });
 
         if (!record) {
             return res.status(400).json({ error: "OTP not found or expired" });
@@ -175,13 +218,13 @@ export const verifyOtp = async (req, res) => {
         if (!safeCompareOTP(otp, record.otp)) {
             // Atomic increment of attempt counter
             const updatedRecord = await Otp.findOneAndUpdate(
-                { phone, purpose: consentPurpose, attempts: { $lt: 3 } },
+                { phone: normalizedPhone, purpose: otpPurpose, attempts: { $lt: 3 } },
                 { $inc: { attempts: 1 } },
                 { returnDocument: 'after' }
             );
 
             if (!updatedRecord || updatedRecord.attempts >= 3) {
-                await Otp.deleteOne({ phone, purpose: consentPurpose });
+                await Otp.deleteOne({ phone: normalizedPhone, purpose: otpPurpose });
 
                 // Get patient info for audit
                 let patientInfo = {};
@@ -196,7 +239,7 @@ export const verifyOtp = async (req, res) => {
                 }
 
                 await LoginAudit.create({
-                    phone,
+                    phone: normalizedPhone,
                     ip: req.ip,
                     userAgent: req.headers["user-agent"],
                     status: isNominee ? "NOMINEE_VERIFY_FAILED" : "LOGIN_FAILED",
@@ -216,11 +259,11 @@ export const verifyOtp = async (req, res) => {
             });
         }
 
-        await Otp.deleteOne({ phone, purpose: consentPurpose });
+        await Otp.deleteOne({ phone: normalizedPhone, purpose: otpPurpose });
 
         // Record Audit Event on Success
         await LoginAudit.create({
-            phone,
+            phone: normalizedPhone,
             ip: req.ip,
             userAgent: req.headers["user-agent"],
             status: isNominee ? "NOMINEE_CONSENT_GRANTED" : "LOGIN_SUCCESS"
@@ -236,7 +279,7 @@ export const verifyOtp = async (req, res) => {
         }
 
         // If this is a login OTP, proceed with login
-        const patient = await Patient.findOne({ phone }).populate('user');
+        const patient = await Patient.findOne({ phone: normalizedPhone }).populate('user');
 
         if (!patient?.user) {
             return res.status(404).json({
@@ -249,7 +292,7 @@ export const verifyOtp = async (req, res) => {
             {
                 id: patient.user._id,
                 patientId: patient._id,
-                phone,
+                phone: normalizedPhone,
                 role: patient.user.role,
                 name: patient.user.name,
                 username: patient.user.username

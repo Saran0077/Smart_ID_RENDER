@@ -108,6 +108,15 @@ const buildPatientSummary = (patient) => ({
   emergencyContact: patient.emergencyContact
 });
 
+const mapMedicalHistoryEntryToVisit = (entry, patient) => ({
+  hospital: entry.hospitalName || 'Hospital not recorded',
+  doctor: entry.doctorName || 'Care team',
+  date: entry.diagnosedDate || patient.updatedAt,
+  summary: entry.notes || entry.condition || 'Medical record updated',
+  category: entry.condition || 'General',
+  recordedByRole: entry.recordedByRole || null
+});
+
 // 🟢 CREATE PATIENT PROFILE
 export const createPatientProfile = async (req, res) => {
   try {
@@ -398,13 +407,9 @@ export const getMyPatientEMR = async (req, res) => {
       return res.status(404).json({ message: 'Patient profile not found' });
     }
 
-    const visits = (patient.medicalHistory || []).map((entry) => ({
-      hospital: 'Unified Care Network',
-      doctor: 'Assigned Care Team',
-      date: entry.diagnosedDate || patient.updatedAt,
-      summary: entry.notes || entry.condition || 'Medical record updated',
-      category: entry.condition || 'General'
-    }));
+    const visits = (patient.medicalHistory || [])
+      .map((entry) => mapMedicalHistoryEntryToVisit(entry, patient))
+      .sort((left, right) => new Date(right.date || 0) - new Date(left.date || 0));
 
     res.json({
       patient: buildPatientSummary(patient),
@@ -444,11 +449,16 @@ export const getMyPatientPrescriptions = async (req, res) => {
       return res.status(404).json({ message: 'Patient profile not found' });
     }
 
-    const prescriptions = (patient.medicalHistory || []).slice(0, 5).map((entry, index) => ({
+    const prescriptions = [...(patient.medicalHistory || [])]
+      .sort((left, right) => new Date(right.diagnosedDate || 0) - new Date(left.diagnosedDate || 0))
+      .slice(0, 5)
+      .map((entry, index) => ({
       id: `${patient._id}-${index + 1}`,
       name: entry.condition || `Prescription ${index + 1}`,
       notes: entry.notes || 'No additional notes',
-      issuedAt: entry.diagnosedDate || patient.updatedAt
+      issuedAt: entry.diagnosedDate || patient.updatedAt,
+      doctor: entry.doctorName || 'Care team',
+      hospital: entry.hospitalName || 'Hospital not recorded'
     }));
 
     res.json({ prescriptions });
@@ -475,7 +485,9 @@ export const addClinicalNote = async (req, res) => {
       diagnosedDate: req.body.timestamp || new Date(),
       notes: req.body.content,
       doctorName: user?.name || 'Unknown',
-      doctorId: userId
+      doctorId: userId,
+      hospitalName: req.body.hospitalName || req.body.facilityName || null,
+      recordedByRole: req.user.role
     };
 
     // Use atomic $push operator to prevent race conditions when multiple doctors add notes simultaneously
@@ -633,6 +645,8 @@ const buildMedicalHistoryPDF = async (patient) => {
           }
           doc.fontSize(11).text(`${index + 1}. ${record.condition || 'Clinical Note'}`);
           doc.fontSize(10).text(`   Date: ${record.diagnosedDate ? new Date(record.diagnosedDate).toLocaleDateString() : 'N/A'}`);
+          doc.fontSize(10).text(`   Hospital: ${record.hospitalName || 'Hospital not recorded'}`);
+          doc.fontSize(10).text(`   Recorded By: ${record.doctorName || 'Care team'}`);
           doc.fontSize(10).text(`   Notes: ${record.notes || 'No additional notes'}`);
           doc.moveDown(0.5);
         });

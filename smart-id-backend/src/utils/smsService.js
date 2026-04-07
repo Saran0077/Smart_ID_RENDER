@@ -203,12 +203,22 @@ class SMSService {
       throw new Error('GSM Bridge URL not configured');
     }
 
-    const response = await fetch(url, {
+    const endpoint = url.endsWith('/send-sms')
+      ? url
+      : `${url.replace(/\/$/, '')}/send-sms`;
+
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    if (apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
+      headers['x-hardware-key'] = apiKey;
+    }
+
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': apiKey ? `Bearer ${apiKey}` : ''
-      },
+      headers,
       body: JSON.stringify({
         phone: phone,
         message: message,

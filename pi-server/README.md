@@ -26,12 +26,14 @@ python server.py
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | System health check |
-| `/scan-nfc` | POST | Scan NFC card |
+| `/nfc/scan` | POST | Scan NFC card |
+| `/nfc/scan/status` | GET | Get queued NFC scan result |
 | `/enroll-fingerprint` | POST | Start fingerprint enrollment |
 | `/enroll-fingerprint/status` | GET | Get enrollment progress |
 | `/enroll-fingerprint/complete` | POST | Complete enrollment |
 | `/enroll-fingerprint/cancel` | POST | Cancel enrollment |
-| `/verify-fingerprint` | POST | Verify fingerprint |
+| `/fingerprint/enroll` | POST | Start fingerprint enrollment (legacy-compatible path) |
+| `/fingerprint/enroll/status` | GET | Get enrollment progress (legacy-compatible path) |
 | `/send-sms` | POST | Send SMS via GSM |
 | `/operation/<id>` | GET | Get operation status |
 | `/operation/<id>/cancel` | POST | Cancel operation |
@@ -45,7 +47,7 @@ curl http://localhost:5001/health
 
 ### Scan NFC Card
 ```bash
-curl -X POST http://localhost:5001/scan-nfc
+curl -X POST http://localhost:5001/nfc/scan
 ```
 
 ### Enroll Fingerprint
@@ -55,13 +57,12 @@ curl -X POST http://localhost:5001/enroll-fingerprint
 
 # Poll status until completed
 curl "http://localhost:5001/enroll-fingerprint/status"
-```
 
-### Verify Fingerprint
-```bash
-curl -X POST http://localhost:5001/verify-fingerprint \
-  -H "Content-Type: application/json" \
-  -d '{"fingerprintId": 1}'
+# Complete after polling reports completion
+curl -X POST http://localhost:5001/enroll-fingerprint/complete
+
+# Cancel if needed
+curl -X POST http://localhost:5001/enroll-fingerprint/cancel
 ```
 
 ### Send SMS

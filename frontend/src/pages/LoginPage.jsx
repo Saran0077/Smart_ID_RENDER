@@ -27,16 +27,18 @@ function LoginPage() {
     })
 
     const handleSendOtp = async () => {
-        if (!patientAuth.phone) return alert("Enter mobile number")
+        const phone = patientAuth.phone.trim()
+        if (!phone) return alert("Enter mobile number")
         setLoading(true)
         try {
             // Calling the backend API to handle OTP dispatch
-            await patientApi.sendOtp(patientAuth.phone)
+            await patientApi.sendOtp(phone)
+            setPatientAuth((current) => ({ ...current, phone }))
             setOtpSent(true)
             console.log("OTP initialization request sent to backend");
         } catch (err) {
             console.error("Backend OTP Send Error:", err)
-            alert("Failed to send access code. Please verify your number or check connection.")
+            alert(err.response?.data?.error || "Failed to send access code. Please verify your number or check connection.")
         } finally {
             setLoading(false)
         }
@@ -44,10 +46,11 @@ function LoginPage() {
 
     const handleVerifyOtp = async (e) => {
         e?.preventDefault()
+        const phone = patientAuth.phone.trim()
         if (!patientAuth.otp) return alert("Enter OTP")
         setLoading(true)
         try {
-            const res = await patientApi.verifyOtp(patientAuth.phone, patientAuth.otp)
+            const res = await patientApi.verifyOtp(phone, patientAuth.otp.trim())
             const loggedUser = login(res.token)
 
             if (loggedUser?.role) {
@@ -55,7 +58,7 @@ function LoginPage() {
             }
         } catch (err) {
             console.error("OTP Verification Error:", err)
-            alert("Invalid code or session expired. Please try again.")
+            alert(err.response?.data?.error || "Invalid code or session expired. Please try again.")
         } finally {
             setLoading(false)
         }

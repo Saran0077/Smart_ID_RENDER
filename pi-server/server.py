@@ -201,6 +201,11 @@ def enroll_fingerprint():
         state_manager.create_operation(op_id, "fingerprint_enroll")
         return jsonify({"success": True, "operationId": op_id, "step": result["step"], "message": result["message"]})
 
+@app.route("/enroll-fingerprint", methods=["POST"])
+@verify_bridge_auth
+def enroll_fingerprint_alias():
+    return enroll_fingerprint()
+
 @app.route("/fingerprint/enroll/status", methods=["GET"])
 @verify_bridge_auth
 def enroll_fingerprint_status():
@@ -214,6 +219,49 @@ def enroll_fingerprint_status():
             return jsonify({"success": False, "failed": True, "error": result.get("error")}), 400
             
         return jsonify({"success": True, "step": result.get("step"), "message": result.get("message")})
+
+@app.route("/enroll-fingerprint/status", methods=["GET"])
+@verify_bridge_auth
+def enroll_fingerprint_status_alias():
+    return enroll_fingerprint_status()
+
+@app.route("/enroll-fingerprint/complete", methods=["POST"])
+@verify_bridge_auth
+def enroll_fingerprint_complete():
+    with fingerprint_lock:
+        result = fingerprint.poll_enrollment()
+
+        if result.get("step") == "completed":
+            return jsonify({
+                "success": True,
+                "fingerprintId": result.get("fingerprintId"),
+                "message": result.get("message", "Enrollment completed successfully")
+            })
+
+        if result.get("step") == "failed":
+            return jsonify({
+                "success": False,
+                "failed": True,
+                "error": result.get("error"),
+                "message": result.get("message", "Enrollment failed")
+            }), 400
+
+        return jsonify({
+            "success": False,
+            "in_progress": True,
+            "step": result.get("step"),
+            "message": result.get("message", "Enrollment still in progress")
+        }), 400
+
+@app.route("/enroll-fingerprint/cancel", methods=["POST"])
+@verify_bridge_auth
+def enroll_fingerprint_cancel():
+    with fingerprint_lock:
+        result = fingerprint.cancel_enrollment()
+        return jsonify({
+            "success": True,
+            "message": result.get("message", "Enrollment cancelled")
+        })
 
 @app.route("/send-sms", methods=["POST"])
 @verify_bridge_auth
