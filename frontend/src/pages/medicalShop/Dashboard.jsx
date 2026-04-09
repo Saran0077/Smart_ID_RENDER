@@ -10,6 +10,7 @@ export default function MedicalShopDashboard() {
     const [dispensing, setDispensing] = useState(false);
     const [dispensedIds, setDispensedIds] = useState(new Set());
     const [printingPrescription, setPrintingPrescription] = useState(null);
+    const [viewingPrescription, setViewingPrescription] = useState(null);
 
     const loadPatientByUid = async (nextUid) => {
         const normalizedUid = nextUid.trim();
@@ -75,16 +76,36 @@ export default function MedicalShopDashboard() {
         }
     };
 
-    const handleViewPDF = (id) => {
-        if (!id) {
+    const handleViewPDF = async (prescription) => {
+        if (!prescription?.id) {
             toast.error("Prescription ID not found");
             return;
         }
-        window.open(
-            `/medical-shop/prescriptions/${encodeURIComponent(id)}`,
-            "_blank",
-            "noopener,noreferrer"
-        );
+
+        setViewingPrescription(prescription.id);
+        try {
+            const pdfBlob = await medicalShopApi.fetchPrescriptionPDF(prescription.id);
+            const url = URL.createObjectURL(pdfBlob);
+            const viewerWindow = window.open(url, "_blank", "noopener,noreferrer");
+
+            if (!viewerWindow) {
+                URL.revokeObjectURL(url);
+                toast.error("Please allow popups to view the prescription PDF");
+                return;
+            }
+
+            const revokeUrl = () => {
+                URL.revokeObjectURL(url);
+            };
+
+            viewerWindow.addEventListener("beforeunload", revokeUrl, { once: true });
+            setTimeout(revokeUrl, 60000);
+        } catch (err) {
+            console.error("View PDF error:", err);
+            toast.error(err.response?.data?.message || "Failed to open prescription PDF");
+        } finally {
+            setViewingPrescription(null);
+        }
     };
 
     const handleMarkAsDispensed = async (prescriptionId) => {
@@ -327,11 +348,16 @@ export default function MedicalShopDashboard() {
                                                     )}
                                                 </button>
                                                 <button
-                                                    onClick={() => handleViewPDF(p.id)}
-                                                    className="flex items-center gap-1.5 text-xs font-bold text-primary hover:bg-primary/5 px-3 py-1.5 rounded-lg transition-all"
+                                                    onClick={() => handleViewPDF(p)}
+                                                    disabled={viewingPrescription === p.id}
+                                                    className="flex items-center gap-1.5 text-xs font-bold text-primary hover:bg-primary/5 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
                                                     title="View PDF"
                                                 >
-                                                    <span className="material-symbols-outlined !text-sm">open_in_new</span>
+                                                    {viewingPrescription === p.id ? (
+                                                        <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></span>
+                                                    ) : (
+                                                        <span className="material-symbols-outlined !text-sm">open_in_new</span>
+                                                    )}
                                                     VIEW
                                                 </button>
                                             </div>
