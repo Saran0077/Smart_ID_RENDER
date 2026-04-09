@@ -11,6 +11,7 @@ import { logAudit } from '../utils/auditLogger.js';
 // Get doctor dashboard statistics
 export const getDoctorStats = async (req, res) => {
   try {
+    const actorId = req.user.id || req.user._id;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -22,7 +23,7 @@ export const getDoctorStats = async (req, res) => {
     ] = await Promise.all([
       Patient.countDocuments(),
       AuditLog.countDocuments({
-        actor: req.user._id,
+        actor: actorId,
         action: 'PATIENT_PROFILE_VIEW',
         createdAt: { $gte: today }
       }),
@@ -31,7 +32,7 @@ export const getDoctorStats = async (req, res) => {
         requester: req.user.id
       }),
       AuditLog.countDocuments({
-        actor: req.user._id,
+        actor: actorId,
         action: { $regex: /emergency/i },
         createdAt: { $gte: today }
       })
@@ -55,6 +56,7 @@ export const getDoctorStats = async (req, res) => {
 // Get patient by NFC UID with full medical data
 export const getPatientByNfc = async (req, res) => {
   try {
+    const actorId = req.user.id || req.user._id;
     const { uid } = req.params;
 
     if (!uid) {
@@ -75,9 +77,9 @@ export const getPatientByNfc = async (req, res) => {
     const healthId = patient.user?.username || patient.nfcUuid || 'Unknown';
 
     // Log the access - with null check
-    if (req.user?._id) {
+    if (actorId) {
       await logAudit({
-        actor: req.user._id,
+        actor: actorId,
         actorRole: req.user.role,
         action: 'NFC_SCAN',
         patient: patient._id,
@@ -114,8 +116,9 @@ export const getPatientByNfc = async (req, res) => {
 // Get doctor's recent patients
 export const getRecentPatients = async (req, res) => {
   try {
+    const actorId = req.user.id || req.user._id;
     const logs = await AuditLog.find({
-      actor: req.user._id,
+      actor: actorId,
       action: 'PATIENT_PROFILE_VIEW'
     })
       .populate('patient')
@@ -169,6 +172,7 @@ export const getDeviceStatus = async (req, res) => {
 
 export const closePatientSession = async (req, res) => {
   try {
+    const actorId = req.user.id || req.user._id;
     const patientId = req.body?.patientId;
 
     if (!patientId) {
@@ -182,7 +186,7 @@ export const closePatientSession = async (req, res) => {
     }
 
     await logAudit({
-      actor: req.user._id,
+      actor: actorId,
       actorRole: req.user.role,
       action: 'PATIENT_SESSION_CLOSE',
       patient: patient._id,
