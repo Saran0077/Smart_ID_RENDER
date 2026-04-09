@@ -1,4 +1,5 @@
 import Patient from '../models/Patient.js';
+import PDFDocument from 'pdfkit';
 
 const getPatientPrescriptions = (patient) => {
   const history = patient.medicalHistory || [];
@@ -22,58 +23,65 @@ const getPatientPrescriptions = (patient) => {
   }));
 };
 
-const buildPdfBuffer = ({ patient, prescription }) => {
-  const lines = [
-    'Smart ID Prescription Summary',
-    `Patient: ${patient.fullName}`,
-    `NFC ID: ${patient.nfcUuid || 'Not linked'}`,
-    `Phone: ${patient.phone || 'N/A'}`,
-    `Prescription: ${prescription.name}`,
-    `Issued: ${new Date(prescription.issuedAt).toLocaleString()}`,
-    `Notes: ${prescription.notes}`
-  ];
+const buildPdfBuffer = ({ patient, prescription }) => new Promise((resolve, reject) => {
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  const buffers = [];
 
-  const escapePdfText = (value) =>
-    String(value)
-      .replace(/\\/g, '\\\\')
-      .replace(/\(/g, '\\(')
-      .replace(/\)/g, '\\)');
+  doc.on('data', (chunk) => buffers.push(chunk));
+  doc.on('end', () => resolve(Buffer.concat(buffers)));
+  doc.on('error', reject);
 
-  const content = [
-    'BT',
-    '/F1 16 Tf',
-    '50 780 Td',
-    ...lines.flatMap((line, index) => [
-      index === 0 ? `(${escapePdfText(line)}) Tj` : `0 -24 Td (${escapePdfText(line)}) Tj`
-    ]),
-    'ET'
-  ].join('\n');
+  const labelStyle = () => doc.font('Helvetica-Bold').fontSize(11).fillColor('#64748b');
+  const valueStyle = () => doc.font('Helvetica').fontSize(14).fillColor('#0f172a');
 
-  const objects = [];
-  objects.push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj');
-  objects.push('2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj');
-  objects.push('3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj');
-  objects.push('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj');
-  objects.push(`5 0 obj\n<< /Length ${Buffer.byteLength(content, 'utf8')} >>\nstream\n${content}\nendstream\nendobj`);
+  doc.font('Helvetica-Bold')
+    .fontSize(22)
+    .fillColor('#0f172a')
+    .text('Smart ID Prescription Summary', { align: 'left' });
 
-  let pdf = '%PDF-1.4\n';
-  const offsets = [0];
+  doc.moveDown(1);
 
-  for (const object of objects) {
-    offsets.push(Buffer.byteLength(pdf, 'utf8'));
-    pdf += `${object}\n`;
-  }
+  labelStyle();
+  doc.text('Patient');
+  valueStyle();
+  doc.text(patient.fullName || 'Unknown Patient');
 
-  const xrefOffset = Buffer.byteLength(pdf, 'utf8');
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += '0000000000 65535 f \n';
-  for (let i = 1; i <= objects.length; i += 1) {
-    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  doc.moveDown(0.6);
+  labelStyle();
+  doc.text('NFC ID');
+  valueStyle();
+  doc.text(patient.nfcUuid || 'Not linked');
 
-  return Buffer.from(pdf, 'utf8');
-};
+  doc.moveDown(0.6);
+  labelStyle();
+  doc.text('Phone');
+  valueStyle();
+  doc.text(patient.phone || 'N/A');
+
+  doc.moveDown(0.6);
+  labelStyle();
+  doc.text('Prescription');
+  valueStyle();
+  doc.text(prescription.name || 'Clinical note');
+
+  doc.moveDown(0.6);
+  labelStyle();
+  doc.text('Issued');
+  valueStyle();
+  doc.text(new Date(prescription.issuedAt).toLocaleString());
+
+  doc.moveDown(1);
+  labelStyle();
+  doc.text('Notes');
+  valueStyle();
+  doc.text(prescription.notes || 'No additional notes recorded.', {
+    width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+    align: 'left',
+    lineGap: 4
+  });
+
+  doc.end();
+});
 
 export const scanPatientForMedicalShop = async (req, res) => {
   try {
@@ -126,7 +134,7 @@ export const getPrescriptionPdf = async (req, res) => {
       || prescriptions[Number(suffix) - 1]
       || prescriptions[0];
 
-    const pdfBuffer = buildPdfBuffer({ patient, prescription });
+    const pdfBuffer = await buildPdfBuffer({ patient, prescription });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="prescription-${prescriptionId}.pdf"`);
