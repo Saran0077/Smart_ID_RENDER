@@ -58,6 +58,11 @@ const doctorApi = {
     closePatientSession: async (patientId) => {
         const res = await api.post("/doctor/close-session", { patientId });
         return res.data;
+    },
+
+    createClinicalNote: async (patientId, payload) => {
+        const res = await api.post(`/patient/${patientId}/notes`, payload);
+        return res.data;
     }
 };
 

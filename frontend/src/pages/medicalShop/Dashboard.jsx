@@ -313,6 +313,20 @@ export default function MedicalShopDashboard() {
                                                 </div>
                                                 <div>
                                                     <span className="font-bold text-slate-700 dark:text-slate-200 block">{p.name || p}</span>
+                                                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                                                        <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-widest ${
+                                                            p.source === "doctor_portal"
+                                                                ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300"
+                                                                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-300"
+                                                        }`}>
+                                                            {p.sourceLabel || "Care team"}
+                                                        </span>
+                                                        {p.doctor && (
+                                                            <span className="text-[11px] font-semibold text-slate-500">
+                                                                {p.doctor}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     {p.notes && (
                                                         <span className="text-xs text-slate-500">{p.notes}</span>
                                                     )}

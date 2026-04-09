@@ -8,6 +8,8 @@ export default function DoctorDashboard() {
     const [error, setError] = useState(null);
     const [stats, setStats] = useState(null);
     const [recentPatients, setRecentPatients] = useState([]);
+    const [noteForm, setNoteForm] = useState({ condition: "", content: "" });
+    const [savingNote, setSavingNote] = useState(false);
 
     const [step, setStep] = useState('idle');
     const [scannedUid, setScannedUid] = useState(null);
@@ -127,6 +129,47 @@ export default function DoctorDashboard() {
         setPatient(null);
         setScannedUid(null);
         setError(null);
+        setNoteForm({ condition: "", content: "" });
+    };
+
+    const handleSaveNote = async (event) => {
+        event.preventDefault();
+
+        const activePatientId = patient?.id || patient?._id;
+        if (!activePatientId) {
+            toast.error("No active patient session found.");
+            return;
+        }
+
+        if (!noteForm.condition.trim() || !noteForm.content.trim()) {
+            toast.error("Please enter both prescription title and note.");
+            return;
+        }
+
+        setSavingNote(true);
+        try {
+            const response = await doctorApi.createClinicalNote(activePatientId, {
+                condition: noteForm.condition.trim(),
+                content: noteForm.content.trim(),
+                mode: "STANDARD",
+                source: "doctor_portal"
+            });
+
+            if (response?.note) {
+                setPatient((prev) => ({
+                    ...prev,
+                    medicalHistory: [response.note, ...(prev?.medicalHistory || [])]
+                }));
+            }
+
+            setNoteForm({ condition: "", content: "" });
+            toast.success("Doctor prescription saved successfully.");
+        } catch (err) {
+            console.error("Failed to save doctor note", err);
+            toast.error(err.response?.data?.message || "Failed to save doctor prescription.");
+        } finally {
+            setSavingNote(false);
+        }
     };
 
     return (
@@ -156,8 +199,8 @@ export default function DoctorDashboard() {
 
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
                 <div>
-                    <h1 className="text-4xl font-black tracking-tight mb-2">Clinical Portal</h1>
-                    <p className="text-slate-500 font-medium">Tap NFC card to view patient records</p>
+                    <h1 className="text-4xl font-black tracking-tight mb-2">Doctor Portal</h1>
+                    <p className="text-slate-500 font-medium">Tap NFC card to review records and write patient prescriptions</p>
                 </div>
             </div>
 
@@ -265,16 +308,42 @@ export default function DoctorDashboard() {
                                         </p>
                                     </div>
                                 )}
+                                <div>
+                                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Doctor Prescription Note</label>
+                                    <form onSubmit={handleSaveNote} className="space-y-3 rounded-[2rem] border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 p-5">
+                                        <input
+                                            type="text"
+                                            value={noteForm.condition}
+                                            onChange={(event) => setNoteForm((prev) => ({ ...prev, condition: event.target.value }))}
+                                            placeholder="Prescription title / condition"
+                                            className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 outline-none focus:border-primary"
+                                        />
+                                        <textarea
+                                            value={noteForm.content}
+                                            onChange={(event) => setNoteForm((prev) => ({ ...prev, content: event.target.value }))}
+                                            placeholder="Write the prescription or doctor note for the patient..."
+                                            rows={5}
+                                            className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 outline-none focus:border-primary"
+                                        />
+                                        <button
+                                            type="submit"
+                                            disabled={savingNote}
+                                            className="w-full rounded-2xl bg-primary px-4 py-3 font-bold text-white transition-all hover:scale-[1.01] disabled:opacity-60"
+                                        >
+                                            {savingNote ? "Saving Prescription..." : "Save Doctor Prescription"}
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
 
                             <div className="space-y-6">
                                 <div className="p-6 rounded-[2rem] border bg-green-50/50 border-green-200 dark:bg-green-950/20 dark:border-green-900/40">
                                     <h3 className="font-bold flex items-center gap-2 mb-4 text-green-600">
                                         <span className="material-symbols-outlined">verified_user</span>
-                                        NFC Verified - View Only Mode
+                                        NFC Verified - Doctor Session Active
                                     </h3>
                                     <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                                        Patient identity verified via NFC card tap. Records are displayed in view-only mode.
+                                        Patient identity verified via NFC card tap. You can now review history and save a doctor-authored prescription note.
                                     </p>
                                 </div>
                                 <div className="p-6 rounded-[2rem] border bg-blue-50/50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-900/40">
@@ -333,6 +402,15 @@ export default function DoctorDashboard() {
                                                         <h4 className="text-lg font-bold text-slate-800 dark:text-slate-100">
                                                             {entry.condition || "Clinical note"}
                                                         </h4>
+                                                        <div className="mt-2">
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                                                                entry.source === "doctor_portal"
+                                                                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300"
+                                                                    : "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-300"
+                                                            }`}>
+                                                                {entry.source === "doctor_portal" ? "Doctor" : "Hospital"}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                     <div className="text-left md:text-right">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">

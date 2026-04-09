@@ -91,7 +91,7 @@ export default function InsuranceSchemes() {
                         source: prescription.hospital || "Hospital not recorded",
                         detail: prescription.notes || prescription.name,
                         date: prescription.issuedAt,
-                        badge: prescription.name
+                        badge: `${prescription.sourceLabel || "Care team"} • ${prescription.name}`
                     }))),
                     ...((auditData || []).map((entry) => ({
                         id: `audit-${entry.id || entry.createdAt}`,

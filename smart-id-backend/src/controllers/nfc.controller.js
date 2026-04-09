@@ -315,7 +315,7 @@ export const enrollFingerprint = async (req, res) => {
       await patient.save();
 
       await logAudit({
-        actor: req.user._id,
+        actor: req.user.id || req.user._id,
         actorRole: req.user.role,
         action: "ENROLL_FINGERPRINT",
         patient: patient._id,

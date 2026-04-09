@@ -92,6 +92,22 @@ export const getPatientByNfc = async (req, res) => {
           nfcId: patient.nfcUuid
         }
       });
+
+      await logAudit({
+        actor: actorId,
+        actorRole: req.user.role,
+        action: 'PATIENT_PROFILE_VIEW',
+        patient: patient._id,
+        resource: 'PATIENT_PROFILE',
+        ipAddress: req.ip,
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName,
+        metadata: {
+          accessMode: 'nfc-scan',
+          nfcId: patient.nfcUuid
+        }
+      });
     }
 
     res.json({

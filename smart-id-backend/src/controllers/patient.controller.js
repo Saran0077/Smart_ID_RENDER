@@ -6,6 +6,16 @@ import crypto from 'crypto';
 import PDFDocument from 'pdfkit';
 import mongoose from 'mongoose';
 
+const getActorId = (req) => req.user?.id || req.user?._id || null;
+const getRecordSourceLabel = (entry) => {
+  if (entry?.source === 'doctor_portal') return 'Doctor';
+  if (entry?.source === 'hospital_portal') return 'Hospital';
+  if (entry?.recordedByRole === 'doctor') return 'Doctor';
+  if (entry?.recordedByRole === 'hospital') return 'Hospital';
+  if (entry?.recordedByRole === 'admin') return 'Admin';
+  return 'Care team';
+};
+
 const calculateAge = (dob) => {
   if (!dob) return null;
 
@@ -138,17 +148,22 @@ const buildRegistrationConflict = (field) => {
 };
 
 const mapMedicalHistoryEntryToVisit = (entry, patient) => ({
-  hospital: entry.hospitalName || 'Hospital not recorded',
+  hospital:
+    entry.hospitalName ||
+    (entry.source === 'doctor_portal' ? 'Doctor Portal' : 'Hospital not recorded'),
   doctor: entry.doctorName || 'Care team',
   date: entry.diagnosedDate || patient.updatedAt,
   summary: entry.notes || entry.condition || 'Medical record updated',
   category: entry.condition || 'General',
-  recordedByRole: entry.recordedByRole || null
+  recordedByRole: entry.recordedByRole || null,
+  source: entry.source || null,
+  sourceLabel: getRecordSourceLabel(entry)
 });
 
 // 🟢 CREATE PATIENT PROFILE
 export const createPatientProfile = async (req, res) => {
   try {
+    const actorId = getActorId(req);
     const existingPatient = await Patient.findOne({ user: req.user._id });
     if (existingPatient) {
       return res.status(400).json({
@@ -183,7 +198,7 @@ export const createPatientProfile = async (req, res) => {
     });
 
     await logAudit({
-      actor: req.user._id,
+      actor: actorId,
       actorRole: req.user.role,
       action: 'PATIENT_REGISTER',
       patient: patient._id,
@@ -204,6 +219,7 @@ export const createPatientProfile = async (req, res) => {
 // 🔵 GET OWN PATIENT PROFILE
 export const getMyPatientProfile = async (req, res) => {
   try {
+    const actorId = getActorId(req);
     const patient = await Patient.findOne({ user: req.user._id }).populate(
       'user',
       'name username role'
@@ -216,7 +232,7 @@ export const getMyPatientProfile = async (req, res) => {
       }
 
       await logAudit({
-        actor: req.user._id,
+        actor: actorId,
         actorRole: req.user.role,
         action: 'PATIENT_PROFILE_VIEW',
         patient: patient._id,
@@ -239,6 +255,7 @@ export const getMyPatientProfile = async (req, res) => {
 // 🟡 UPDATE OWN PATIENT PROFILE
 export const updateMyPatientProfile = async (req, res) => {
   try {
+    const actorId = getActorId(req);
     const age = req.body.dob ? calculateAge(req.body.dob) : undefined;
     const updates = {
       ...req.body,
@@ -273,7 +290,7 @@ export const updateMyPatientProfile = async (req, res) => {
     }
 
     await logAudit({
-      actor: req.user._id,
+      actor: actorId,
       actorRole: req.user.role,
       action: 'PATIENT_PROFILE_UPDATE',
       patient: patient._id,
@@ -300,6 +317,7 @@ export const registerPatientByHospital = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
+    const actorId = getActorId(req);
     const {
       fullName,
       dob,
@@ -316,7 +334,6 @@ export const registerPatientByHospital = async (req, res) => {
       nfcId,
       govtId,
       address,
-      hospitalId,
       fingerprintId
     } = req.body;
 
@@ -421,7 +438,7 @@ export const registerPatientByHospital = async (req, res) => {
     session.endSession();
 
     await logAudit({
-      actor: hospitalId || req.user.id,
+      actor: actorId,
       actorRole: req.user.role,
       action: 'PATIENT_REGISTER',
       patient: patient[0]._id,
@@ -575,7 +592,10 @@ export const getMyPatientPrescriptions = async (req, res) => {
       notes: entry.notes || 'No additional notes',
       issuedAt: entry.diagnosedDate || patient.updatedAt,
       doctor: entry.doctorName || 'Care team',
-      hospital: entry.hospitalName || 'Hospital not recorded'
+      hospital: entry.hospitalName || (entry.source === 'doctor_portal' ? 'Doctor Portal' : 'Hospital not recorded'),
+      source: entry.source || null,
+      sourceLabel: getRecordSourceLabel(entry),
+      recordedByRole: entry.recordedByRole || null
     }));
 
     res.json({ prescriptions });
@@ -601,14 +621,22 @@ export const addClinicalNote = async (req, res) => {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
+    const noteSource = req.body.source || (req.user.role === 'doctor' ? 'doctor_portal' : 'hospital_portal');
+    const hospitalOrFacilityName =
+      req.body.hospitalName ||
+      req.body.facilityName ||
+      req.user?.facilityName ||
+      req.user?.hospitalName ||
+      null;
     const note = {
-      condition: req.body.mode === 'EMERGENCY' ? 'Emergency intervention' : 'Clinical note',
+      condition: req.body.mode === 'EMERGENCY' ? 'Emergency intervention' : (req.body.condition || 'Clinical note'),
       diagnosedDate: req.body.timestamp || new Date(),
       notes: req.body.content,
       doctorName: user?.name || 'Unknown',
       doctorId: userId,
-      hospitalName: req.body.hospitalName || req.body.facilityName || user?.name || null,
-      recordedByRole: req.user.role
+      hospitalName: hospitalOrFacilityName,
+      recordedByRole: req.user.role,
+      source: noteSource
     };
 
     // Use atomic $push operator to prevent race conditions when multiple doctors add notes simultaneously
@@ -619,7 +647,11 @@ export const addClinicalNote = async (req, res) => {
     await logAudit({
       actor: userId,
       actorRole: req.user.role,
-      action: req.body.mode === 'EMERGENCY' ? 'EMERGENCY_ACCESS' : 'CLINICAL_NOTE_ADD',
+      action: req.body.mode === 'EMERGENCY'
+        ? 'EMERGENCY_ACCESS'
+        : req.user.role === 'doctor'
+          ? 'DOCTOR_NOTE_ADD'
+          : 'CLINICAL_NOTE_ADD',
       patient: patient._id,
       resource: 'EMR_NOTE',
       ipAddress: req.ip,
@@ -628,7 +660,9 @@ export const addClinicalNote = async (req, res) => {
       targetName: patient.fullName,
       metadata: {
         mode: req.body.mode || 'STANDARD',
-        hospitalName: note.hospitalName || null
+        hospitalName: note.hospitalName || null,
+        source: note.source,
+        condition: note.condition
       }
     });
 
@@ -797,7 +831,8 @@ const buildMedicalHistoryPDF = async (patient) => {
           }
           doc.fontSize(11).text(`${index + 1}. ${record.condition || 'Clinical Note'}`);
           doc.fontSize(10).text(`   Date: ${record.diagnosedDate ? new Date(record.diagnosedDate).toLocaleDateString() : 'N/A'}`);
-          doc.fontSize(10).text(`   Hospital: ${record.hospitalName || 'Hospital not recorded'}`);
+          doc.fontSize(10).text(`   Source: ${getRecordSourceLabel(record)}`);
+          doc.fontSize(10).text(`   Hospital: ${record.hospitalName || (record.source === 'doctor_portal' ? 'Doctor Portal' : 'Hospital not recorded')}`);
           doc.fontSize(10).text(`   Recorded By: ${record.doctorName || 'Care team'}`);
           doc.fontSize(10).text(`   Notes: ${record.notes || 'No additional notes'}`);
           doc.moveDown(0.5);

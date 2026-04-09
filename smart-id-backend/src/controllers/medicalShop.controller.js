@@ -1,5 +1,15 @@
 import Patient from '../models/Patient.js';
 import PDFDocument from 'pdfkit';
+import { logAudit } from '../utils/auditLogger.js';
+
+const getActorId = (req) => req.user?.id || req.user?._id || null;
+const getSourceLabel = (entry) => {
+  if (entry?.source === 'doctor_portal') return 'Doctor';
+  if (entry?.source === 'hospital_portal') return 'Hospital';
+  if (entry?.recordedByRole === 'doctor') return 'Doctor';
+  if (entry?.recordedByRole === 'hospital') return 'Hospital';
+  return 'Care team';
+};
 
 const getPatientPrescriptions = (patient) => {
   const history = patient.medicalHistory || [];
@@ -19,7 +29,12 @@ const getPatientPrescriptions = (patient) => {
     id: `${patient._id}-${index + 1}`,
     name: entry.condition || `Prescription ${index + 1}`,
     notes: entry.notes || 'No additional notes',
-    issuedAt: entry.diagnosedDate || patient.updatedAt
+    issuedAt: entry.diagnosedDate || patient.updatedAt,
+    doctor: entry.doctorName || 'Care team',
+    hospital: entry.hospitalName || (entry.source === 'doctor_portal' ? 'Doctor Portal' : 'Hospital not recorded'),
+    source: entry.source || null,
+    sourceLabel: getSourceLabel(entry),
+    recordedByRole: entry.recordedByRole || null
   }));
 };
 
@@ -70,6 +85,24 @@ const buildPdfBuffer = ({ patient, prescription }) => new Promise((resolve, reje
   valueStyle();
   doc.text(new Date(prescription.issuedAt).toLocaleString());
 
+  doc.moveDown(0.6);
+  labelStyle();
+  doc.text('Source');
+  valueStyle();
+  doc.text(prescription.sourceLabel || 'Care team');
+
+  doc.moveDown(0.6);
+  labelStyle();
+  doc.text('Recorded By');
+  valueStyle();
+  doc.text(prescription.doctor || 'Care team');
+
+  doc.moveDown(0.6);
+  labelStyle();
+  doc.text('Facility');
+  valueStyle();
+  doc.text(prescription.hospital || 'Hospital not recorded');
+
   doc.moveDown(1);
   labelStyle();
   doc.text('Notes');
@@ -86,6 +119,7 @@ const buildPdfBuffer = ({ patient, prescription }) => new Promise((resolve, reje
 export const scanPatientForMedicalShop = async (req, res) => {
   try {
     const { uid } = req.body;
+    const actorId = getActorId(req);
 
     if (!uid) {
       return res.status(400).json({ message: 'NFC UID is required' });
@@ -96,6 +130,21 @@ export const scanPatientForMedicalShop = async (req, res) => {
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found for this NFC card' });
     }
+
+    await logAudit({
+      actor: actorId,
+      actorRole: req.user.role,
+      action: 'MEDICAL_SHOP_SCAN',
+      patient: patient._id,
+      resource: 'PATIENT_PRESCRIPTIONS',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
+      metadata: {
+        nfcId: patient.nfcUuid
+      }
+    });
 
     res.json({
       patient: {
@@ -118,6 +167,7 @@ export const scanPatientForMedicalShop = async (req, res) => {
 
 export const getPrescriptionPdf = async (req, res) => {
   try {
+    const actorId = getActorId(req);
     const prescriptionId = decodeURIComponent(req.params.prescriptionId);
     const lastHyphenIndex = prescriptionId.lastIndexOf('-');
     const patientId = prescriptionId.substring(0, lastHyphenIndex);
@@ -136,6 +186,21 @@ export const getPrescriptionPdf = async (req, res) => {
 
     const pdfBuffer = await buildPdfBuffer({ patient, prescription });
 
+    await logAudit({
+      actor: actorId,
+      actorRole: req.user.role,
+      action: 'PRESCRIPTION_PDF_VIEW',
+      patient: patient._id,
+      resource: 'PRESCRIPTION_PDF',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
+      metadata: {
+        prescriptionId
+      }
+    });
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="prescription-${prescriptionId}.pdf"`);
     res.send(pdfBuffer);
@@ -147,6 +212,7 @@ export const getPrescriptionPdf = async (req, res) => {
 
 export const markAsDispensed = async (req, res) => {
   try {
+    const actorId = getActorId(req);
     const { prescriptionId, patientId } = req.body;
 
     if (!prescriptionId || !patientId) {
@@ -168,6 +234,21 @@ export const markAsDispensed = async (req, res) => {
       await patient.save();
     }
 
+    await logAudit({
+      actor: actorId,
+      actorRole: req.user.role,
+      action: 'PRESCRIPTION_DISPENSE',
+      patient: patient._id,
+      resource: 'PATIENT_PRESCRIPTIONS',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
+      metadata: {
+        prescriptionId
+      }
+    });
+
     res.json({
       success: true,
       message: 'Prescription marked as dispensed',
@@ -181,6 +262,7 @@ export const markAsDispensed = async (req, res) => {
 
 export const getPatientById = async (req, res) => {
   try {
+    const actorId = getActorId(req);
     const { patientId } = req.params;
 
     const patient = await Patient.findById(patientId).populate('user', 'name username role');
@@ -188,6 +270,18 @@ export const getPatientById = async (req, res) => {
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found' });
     }
+
+    await logAudit({
+      actor: actorId,
+      actorRole: req.user.role,
+      action: 'PATIENT_PRESCRIPTIONS_VIEW',
+      patient: patient._id,
+      resource: 'PATIENT_PRESCRIPTIONS',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
 
     res.json({
       patient: {

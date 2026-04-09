@@ -126,6 +126,15 @@ export default function Dashboard() {
                                     <p className="text-sm font-medium text-slate-500 dark:text-emerald-200/40">
                                         {visit.doctor} | {visit.date ? new Date(visit.date).toLocaleDateString() : "N/A"}
                                     </p>
+                                    <div className="mt-2">
+                                        <span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                                            visit.source === "doctor_portal"
+                                                ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300"
+                                                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-300"
+                                        }`}>
+                                            {visit.sourceLabel || "Care team"}
+                                        </span>
+                                    </div>
                                 </div>
                                 <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${visit.category === "Illness" ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"}`}>
                                     {visit.category || "Visit"}

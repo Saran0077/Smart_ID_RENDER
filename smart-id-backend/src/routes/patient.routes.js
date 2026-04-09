@@ -99,7 +99,7 @@ router.get(
       }
 
       await logAudit({
-        actor: req.user._id,
+        actor: req.user.id || req.user._id,
         actorRole: req.user.role,
         action: 'PATIENT_PROFILE_VIEW',
         patient: patient._id,
@@ -163,7 +163,7 @@ router.get(
       }
 
       await logAudit({
-        actor: req.user._id,
+        actor: req.user.id || req.user._id,
         actorRole: req.user.role,
         action: 'PATIENT_PROFILE_VIEW',
         patient: patient._id,
