@@ -27,6 +27,37 @@ const auditLogSchema = new mongoose.Schema(
       type: String
     },
 
+    outcome: {
+      type: String,
+      enum: ['SUCCESS', 'DENIED', 'FAILED'],
+      default: 'SUCCESS'
+    },
+
+    reason: {
+      type: String,
+      default: null
+    },
+
+    targetType: {
+      type: String,
+      default: null
+    },
+
+    targetId: {
+      type: String,
+      default: null
+    },
+
+    targetName: {
+      type: String,
+      default: null
+    },
+
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null
+    },
+
     ipAddress: {
       type: String
     }
@@ -39,5 +70,8 @@ const auditLogSchema = new mongoose.Schema(
 auditLogSchema.index({ actor: 1, createdAt: -1 });
 auditLogSchema.index({ patient: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
+auditLogSchema.index({ actorRole: 1, createdAt: -1 });
+auditLogSchema.index({ resource: 1, createdAt: -1 });
+auditLogSchema.index({ outcome: 1, createdAt: -1 });
 
 export default mongoose.model('AuditLog', auditLogSchema);

@@ -11,11 +11,15 @@ export const checkConsent = async (req, res, next) => {
       await logAudit({
         actor: req.user.id,
         actorRole: req.user.role,
-        action: 'VIEW_PATIENT_PROFILE_DENIED',
+        action: 'CONSENT_DENIED',
         patient: patientId,
         resource: 'PATIENT_PROFILE',
         ipAddress: req.ip,
-        reason: 'Invalid patient ID format'
+        outcome: 'DENIED',
+        reason: 'Invalid patient ID format',
+        targetType: 'patient',
+        targetId: `${patientId}`,
+        targetName: 'Unknown patient'
       });
 
       return res.status(400).json({
@@ -28,11 +32,15 @@ export const checkConsent = async (req, res, next) => {
       await logAudit({
         actor: req.user.id,
         actorRole: req.user.role,
-        action: 'VIEW_PATIENT_PROFILE_DENIED',
+        action: 'CONSENT_DENIED',
         patient: patientId,
         resource: 'PATIENT_PROFILE',
         ipAddress: req.ip,
-        reason: 'Patient not found'
+        outcome: 'DENIED',
+        reason: 'Patient not found',
+        targetType: 'patient',
+        targetId: `${patientId}`,
+        targetName: 'Unknown patient'
       });
 
       return res.status(404).json({ message: 'Patient not found' });
@@ -49,11 +57,15 @@ export const checkConsent = async (req, res, next) => {
       await logAudit({
         actor: req.user.id,
         actorRole: req.user.role,
-        action: 'VIEW_PATIENT_PROFILE_DENIED',
+        action: 'CONSENT_DENIED',
         patient: patientId,
         resource: 'PATIENT_PROFILE',
         ipAddress: req.ip,
-        reason: 'No valid consent found'
+        outcome: 'DENIED',
+        reason: 'No valid consent found',
+        targetType: 'patient',
+        targetId: `${patientId}`,
+        targetName: patient.fullName
       });
 
       return res.status(403).json({
@@ -64,10 +76,14 @@ export const checkConsent = async (req, res, next) => {
     await logAudit({
       actor: req.user.id,
       actorRole: req.user.role,
-      action: 'VIEW_PATIENT_PROFILE_ALLOWED',
+      action: 'CONSENT_GRANTED',
       patient: patientId,
       resource: 'PATIENT_PROFILE',
-      ipAddress: req.ip
+      ipAddress: req.ip,
+      outcome: 'SUCCESS',
+      targetType: 'patient',
+      targetId: `${patientId}`,
+      targetName: patient.fullName
     });
 
     next();

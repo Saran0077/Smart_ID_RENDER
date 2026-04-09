@@ -121,6 +121,10 @@ const managementApi = {
         const res = await api.post("/hospital/emergency/auth", credentials);
         return res.data;
     },
+    verifyEmergencyCard: async (payload) => {
+        const res = await api.post("/hospital/emergency/verify-card", payload, { timeout: 45000 });
+        return res.data;
+    },
 
     // Clinical Records
     createEmr: async (payload) => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import { useSession } from "../../context/SessionContext";
 import { useEmergency } from "../../context/EmergencyContext";
 import hospitalAPI from "../../services/management.api";
@@ -8,8 +9,10 @@ export default function EmergencyNFC() {
     const navigate = useNavigate();
     const { patient, setPatient } = useSession();
     const { emergency } = useEmergency();
-    const [isScanning, setIsScanning] = useState(true);
+    const [isScanning, setIsScanning] = useState(false);
+    const [hasStarted, setHasStarted] = useState(false);
     const [error, setError] = useState(null);
+    const expectedUid = `${patient?.nfcId || patient?.nfcUuid || ""}`.trim();
 
     useEffect(() => {
         if (!emergency?.active) {
@@ -17,36 +20,53 @@ export default function EmergencyNFC() {
         }
     }, [emergency?.active, navigate]);
 
-    const handleNFCTap = useCallback(async () => {
-        if (!patient?.nfcId && !patient?.id) {
-            setError("No patient session is available for emergency verification.");
+    const handleEmergencyScan = useCallback(async () => {
+        if (!patient?.id || !expectedUid) {
+            const sessionError = "Emergency override requires an active patient session with a linked NFC card.";
+            setError(sessionError);
+            toast.error(sessionError);
+            navigate("/hospital");
             return;
         }
 
         try {
+            setIsScanning(true);
+            setHasStarted(true);
             setError(null);
-            const scan = await hospitalAPI.scanNfc(patient.nfcId ? patient.nfcId : undefined);
-            const resolvedUid = scan?.uid || patient.nfcId;
+            const scan = await hospitalAPI.verifyEmergencyCard({
+                patientId: patient.id || patient._id,
+                expectedUid
+            });
 
-            if (!resolvedUid) {
-                throw new Error("The NFC reader did not return a card UID.");
+            if (!scan?.matched || !scan?.patient) {
+                throw new Error(scan?.message || "Emergency NFC verification failed.");
             }
 
-            const refreshedPatient = await hospitalAPI.getPatientByNfc(resolvedUid);
+            const refreshedPatient = scan.patient;
             setPatient({
                 ...refreshedPatient,
                 name: refreshedPatient.name || refreshedPatient.fullName || patient.name,
                 location: refreshedPatient.location || patient.location || "Hospital intake",
             });
             setIsScanning(false);
+            toast.success("Patient card verified successfully");
             setTimeout(() => {
                 navigate("/hospital/clinical-note");
             }, 1200);
         } catch (scanError) {
             console.error("Emergency NFC verification failed:", scanError);
             setError(scanError.response?.data?.message || scanError.message || "Emergency NFC verification failed.");
+            setIsScanning(false);
         }
-    }, [navigate, patient, setPatient]);
+    }, [navigate, patient, setPatient, expectedUid]);
+
+    useEffect(() => {
+        if (!emergency?.active) return;
+        if (hasStarted) return;
+        if (!patient?.id || !expectedUid) return;
+
+        handleEmergencyScan();
+    }, [emergency?.active, hasStarted, patient?.id, expectedUid, handleEmergencyScan]);
 
     if (!patient || !emergency?.active) return null;
 
@@ -55,8 +75,7 @@ export default function EmergencyNFC() {
             <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl border border-red-100 dark:border-red-900/30 overflow-hidden animate-in zoom-in-95 duration-300">
                 <div className="p-10 text-center">
                     <div 
-                        onClick={handleNFCTap}
-                        className={`mx-auto size-24 bg-red-50 dark:bg-red-950 rounded-3xl flex items-center justify-center mb-8 border border-red-100 dark:border-red-800 relative cursor-pointer ${isScanning ? 'animate-pulse' : ''}`}
+                        className={`mx-auto size-24 bg-red-50 dark:bg-red-950 rounded-3xl flex items-center justify-center mb-8 border border-red-100 dark:border-red-800 relative ${isScanning ? 'animate-pulse' : ''}`}
                     >
                         <span className={`material-symbols-outlined text-6xl transition-all duration-500 ${isScanning ? 'text-red-500' : 'text-emerald-500'}`}>
                             contactless
@@ -79,12 +98,19 @@ export default function EmergencyNFC() {
                         <div className="flex flex-col items-center gap-4">
                             <div className="flex items-center gap-2 text-xs font-bold px-6 py-3 bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 rounded-2xl">
                                 <div className="size-2 bg-red-500 rounded-full animate-ping"></div>
-                                Waiting for Hardware Tap
+                                {isScanning ? "Waiting for Hardware Tap" : "Ready to Retry Scan"}
                             </div>
                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                                Place the physical card against the Raspberry Pi reader
+                                Place the physical card against the Raspberry Pi reader. A live card read is required for emergency access.
                             </p>
                             {error && <p className="text-sm font-bold text-red-500 text-center">{error}</p>}
+                            <button
+                                onClick={handleEmergencyScan}
+                                disabled={isScanning}
+                                className="px-5 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-60"
+                            >
+                                {isScanning ? "Scanning..." : "Start Scan Again"}
+                            </button>
                         </div>
                     ) : (
                         <div className="py-5 bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-500 rounded-2xl flex items-center justify-center gap-3 text-emerald-700 dark:text-emerald-400 font-bold animate-in fade-in zoom-in-95">

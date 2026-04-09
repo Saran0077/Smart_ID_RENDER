@@ -3,6 +3,8 @@ import LoginAudit from '../models/LoginAudit.js';
 import Patient from '../models/Patient.js';
 import Permission from '../models/Permission.js';
 import User from '../models/User.js';
+import { fetchUnifiedAuditEvents } from '../utils/auditEventFormatter.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -33,11 +35,15 @@ const buildPatientAdminResponse = (patient) => ({
 
 export const getStatistics = async (_req, res) => {
   try {
-    const [totalUsers, activeCards, dailyScans, emergencyAccess] = await Promise.all([
+    const sinceYesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [totalUsers, activeCards, dailyAuditEvents, dailyLoginEvents, emergencyAccess] = await Promise.all([
       User.countDocuments(),
       Patient.countDocuments({ nfcUuid: { $exists: true, $ne: null } }),
       AuditLog.countDocuments({
-        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+        createdAt: { $gte: sinceYesterday }
+      }),
+      LoginAudit.countDocuments({
+        createdAt: { $gte: sinceYesterday }
       }),
       AuditLog.countDocuments({ action: /EMERGENCY/i })
     ]);
@@ -45,7 +51,7 @@ export const getStatistics = async (_req, res) => {
     res.json({
       totalUsers,
       activeCards,
-      dailyScans,
+      dailyScans: dailyAuditEvents + dailyLoginEvents,
       emergencyAccess
     });
   } catch (error) {
@@ -54,24 +60,26 @@ export const getStatistics = async (_req, res) => {
   }
 };
 
-export const getAuditLogs = async (_req, res) => {
+export const getAuditLogs = async (req, res) => {
   try {
-    const logs = await AuditLog.find()
-      .populate('actor', 'name username role')
-      .populate('patient', 'fullName')
-      .sort({ createdAt: -1 })
-      .limit(50);
+    await logAudit({
+      actor: req.user.id,
+      actorRole: req.user.role,
+      action: 'ADMIN_AUDIT_VIEW',
+      resource: 'AUDIT_LOG',
+      ipAddress: req.ip,
+      targetType: 'audit',
+      targetName: 'Master audit log'
+    });
 
-    const formattedLogs = logs.map((log) => ({
-      id: log._id,
-      action: log.action,
-      user: log.actor?.name || log.actor?.username || 'Unknown user',
-      target: log.patient?.fullName || log.resource || 'System',
-      time: log.createdAt,
-      actorRole: log.actorRole
-    }));
+    const logs = await fetchUnifiedAuditEvents({
+      auditFilter: {},
+      loginFilter: {},
+      auditLimit: 150,
+      loginLimit: 100
+    });
 
-    res.json(formattedLogs);
+    res.json(logs);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Failed to fetch audit logs' });
@@ -134,6 +142,19 @@ export const getPatientDetailsByUser = async (req, res) => {
       return res.status(404).json({ message: 'Patient details not found for this user' });
     }
 
+    await logAudit({
+      actor: req.user.id,
+      actorRole: req.user.role,
+      action: 'PATIENT_PROFILE_VIEW',
+      patient: patient._id,
+      resource: 'PATIENT_PROFILE',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
+      metadata: { viewedBy: 'admin' }
+    });
+
     res.json(buildPatientAdminResponse(patient));
   } catch (error) {
     console.error(error);
@@ -180,6 +201,23 @@ export const searchPatients = async (req, res) => {
       .limit(Math.min(parseInt(limit, 10) || 20, 50))
       .lean();
 
+    await logAudit({
+      actor: req.user.id,
+      actorRole: req.user.role,
+      action: 'PATIENT_SEARCH',
+      resource: 'PATIENT_DIRECTORY',
+      ipAddress: req.ip,
+      targetType: 'search',
+      targetName: 'Patient search',
+      metadata: {
+        q: q || null,
+        phone: phone || null,
+        govtId: govtId || null,
+        nfcId: nfcId || null,
+        results: patients.length
+      }
+    });
+
     res.json(patients.map(buildPatientAdminResponse));
   } catch (error) {
     console.error(error);
@@ -216,6 +254,18 @@ export const savePermissions = async (req, res) => {
       { permissions, updatedAt: new Date() },
       { upsert: true, returnDocument: 'after' }
     );
+
+    await logAudit({
+      actor: req.user.id,
+      actorRole: req.user.role,
+      action: 'ADMIN_PERMISSIONS_UPDATE',
+      resource: 'ROLE_PERMISSIONS',
+      ipAddress: req.ip,
+      targetType: 'role',
+      targetId: role,
+      targetName: role,
+      metadata: { permissions }
+    });
     
     res.json({
       success: true,
@@ -293,6 +343,21 @@ export const createUser = async (req, res) => {
     });
     
     await user.save();
+
+    await logAudit({
+      actor: req.user.id,
+      actorRole: req.user.role,
+      action: 'ADMIN_USER_CREATE',
+      resource: 'USER_ACCOUNT',
+      ipAddress: req.ip,
+      targetType: 'user',
+      targetId: `${user._id}`,
+      targetName: user.name,
+      metadata: {
+        role: user.role,
+        username: user.username
+      }
+    });
     
     res.status(201).json({
       success: true,
@@ -329,6 +394,22 @@ export const toggleUserStatus = async (req, res) => {
     const newStatus = user.isActive ? 'inactive' : 'active';
     user.isActive = !user.isActive;
     await user.save();
+
+    await logAudit({
+      actor: req.user.id,
+      actorRole: req.user.role,
+      action: 'ADMIN_USER_TOGGLE',
+      resource: 'USER_ACCOUNT',
+      ipAddress: req.ip,
+      targetType: 'user',
+      targetId: `${user._id}`,
+      targetName: user.name,
+      metadata: {
+        status: newStatus,
+        role: user.role,
+        username: user.username
+      }
+    });
     
     res.json({
       success: true,

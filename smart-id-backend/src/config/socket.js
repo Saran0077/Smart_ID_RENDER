@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import AuditLog from '../models/AuditLog.js';
 import Consent from '../models/Consent.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 let io;
 
@@ -62,13 +63,19 @@ export const initSocketIO = (server) => {
         severity: data.severity || 'high'
       });
 
-      await AuditLog.create({
+      await logAudit({
         actor: socket.user.id,
         actorRole: socket.user.role,
-        action: 'EMERGENCY_ALERT_SENT',
+        action: 'EMERGENCY_ACCESS',
         patient: data.patientId,
         resource: 'EMERGENCY_NOTIFICATION',
-        ipAddress: socket.handshake.address
+        ipAddress: socket.handshake.address,
+        targetType: 'patient',
+        targetId: `${data.patientId}`,
+        targetName: data.patientName || 'Emergency patient',
+        metadata: {
+          severity: data.severity || 'high'
+        }
       });
     });
 
@@ -84,6 +91,21 @@ export const initSocketIO = (server) => {
           timestamp: new Date()
         });
       }
+
+      await logAudit({
+        actor: socket.user.id,
+        actorRole: socket.user.role,
+        action: 'CONSENT_REQUEST',
+        patient: data.patientId || null,
+        resource: 'CONSENT',
+        ipAddress: socket.handshake.address,
+        targetType: data.patientId ? 'patient' : 'consent',
+        targetId: data.patientId ? `${data.patientId}` : null,
+        targetName: data.patientName || 'Consent request',
+        metadata: {
+          purpose: data.purpose || null
+        }
+      });
     });
 
     socket.on('otp-sent', (data) => {

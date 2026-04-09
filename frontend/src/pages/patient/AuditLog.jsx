@@ -54,31 +54,39 @@ export default function AuditLog() {
                             {logs.map((log, i) => (
                                 <tr
                                     key={i}
-                                    className={`transition-colors hover:bg-slate-50 dark:hover:bg-emerald-900/5 ${log.emergency || /EMERGENCY/i.test(log.action) ? "bg-red-50/50 dark:bg-red-900/10" : ""}`}
+                                    className={`transition-colors hover:bg-slate-50 dark:hover:bg-emerald-900/5 ${log.isEmergency || /EMERGENCY/i.test(log.action) ? "bg-red-50/50 dark:bg-red-900/10" : ""}`}
                                 >
-                                    <td className="p-5 font-mono text-xs text-slate-500 dark:text-emerald-200/60 leading-none">{log.timestamp || new Date(log.createdAt || log.time).toLocaleString()}</td>
+                                    <td className="p-5 font-mono text-xs text-slate-500 dark:text-emerald-200/60 leading-none">{log.timestamp ? new Date(log.timestamp).toLocaleString() : "-"}</td>
                                     <td className="p-5">
                                         <div className="flex items-center gap-3">
-                                            <div className={`size-8 rounded-lg flex items-center justify-center ${log.emergency || /EMERGENCY/i.test(log.action) ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                                <span className="material-symbols-outlined text-sm">{log.emergency || /EMERGENCY/i.test(log.action) ? 'warning' : 'person'}</span>
+                                            <div className={`size-8 rounded-lg flex items-center justify-center ${log.isEmergency || /EMERGENCY/i.test(log.action) ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                                <span className="material-symbols-outlined text-sm">{log.isEmergency || /EMERGENCY/i.test(log.action) ? 'warning' : 'person'}</span>
                                             </div>
-                                            <span className="font-bold text-slate-700 dark:text-emerald-50">{log.actorName || log.user || log.actorRole || 'System'}</span>
+                                            <span className="font-bold text-slate-700 dark:text-emerald-50">{log.actorName}</span>
                                         </div>
                                     </td>
                                     <td className="p-5">
-                                        <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-[10px] font-bold text-slate-600 dark:text-emerald-200/60 uppercase">
-                                            {log.action}
-                                        </span>
+                                        <div className="space-y-1">
+                                            <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-[10px] font-bold text-slate-600 dark:text-emerald-200/60 uppercase">
+                                                {log.action}
+                                            </span>
+                                            {log.targetName && (
+                                                <div className="text-xs text-slate-500 dark:text-emerald-200/60">{log.targetName}</div>
+                                            )}
+                                            {log.reason && (
+                                                <div className="text-xs text-rose-500">{log.reason}</div>
+                                            )}
+                                        </div>
                                     </td>
                                     <td className="p-5">
-                                        <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black tracking-tight ${log.emergency || /EMERGENCY/i.test(log.action)
+                                        <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black tracking-tight ${log.outcome === 'FAILED' || log.outcome === 'DENIED'
                                                 ? "bg-red-100 text-red-700 border border-red-200"
                                                 : "bg-emerald-100 text-emerald-700 border border-emerald-200"
                                             }`}>
                                             <span className="material-symbols-outlined text-[10px]">
-                                                {log.emergency || /EMERGENCY/i.test(log.action) ? 'emergency' : 'verified_user'}
+                                                {log.outcome === 'FAILED' || log.outcome === 'DENIED' ? 'error' : 'verified_user'}
                                             </span>
-                                            {log.method || log.resource || log.actorRole || 'VERIFIED'}
+                                            {log.outcome || 'SUCCESS'}
                                         </div>
                                     </td>
                                 </tr>

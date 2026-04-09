@@ -42,7 +42,9 @@ export default function OtpAuth() {
     // Send OTP function
     const sendOTP = useCallback(async (target = consentTarget) => {
         const isNominee = target === CONSENT_TARGET.NOMINEE;
-        const phone = isNominee ? nomineeInfo?.phone : patient?.phone;
+        const phone = isNominee
+            ? (nomineeInfo?.phone || patient?.emergencyContact?.phone)
+            : patient?.phone;
         const patientId = patient?._id || patient?.id;
 
         if (!phone) {
@@ -54,7 +56,9 @@ export default function OtpAuth() {
         setError(null);
 
         try {
-            const response = await hospitalAPI.sendOtp(phone, patientId);
+            const response = isNominee
+                ? await hospitalAPI.sendNomineeOtp(phone, patientId)
+                : await hospitalAPI.sendOtp(phone, patientId);
             
             if (response.success) {
                 toast.success(response.message);
@@ -114,7 +118,7 @@ export default function OtpAuth() {
                 setOtpVerified(true);
                 setAuthMethod(isNominee ? CONSENT_TARGET.NOMINEE : CONSENT_TARGET.PATIENT);
                 toast.success(isNominee ? "Nominee consent verified" : "Patient consent verified");
-                navigate("/hospital/clinical-note/biometric");
+                navigate(isNominee ? "/hospital/clinical-note" : "/hospital/clinical-note/biometric");
             } else {
                 handleFailedAttempt();
             }

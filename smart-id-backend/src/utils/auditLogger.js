@@ -6,7 +6,13 @@ export const logAudit = async ({
   action,
   patient,
   resource,
-  ipAddress
+  ipAddress,
+  outcome = 'SUCCESS',
+  reason = null,
+  targetType = null,
+  targetId = null,
+  targetName = null,
+  metadata = null
 }) => {
   try {
     await AuditLog.create({
@@ -15,7 +21,13 @@ export const logAudit = async ({
       action,
       patient,
       resource,
-      ipAddress
+      ipAddress,
+      outcome,
+      reason,
+      targetType,
+      targetId,
+      targetName,
+      metadata
     });
   } catch (error) {
     console.error('Audit log error:', error.message);

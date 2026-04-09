@@ -2,22 +2,22 @@ import { useEffect, useState } from "react";
 import doctorApi from "../../services/doctor.api";
 
 const formatHistoryRecord = (record) => {
-    const patientName = record.patient?.fullName || record.target || "System";
-    const date = record.timestamp || record.createdAt || record.time || null;
-    const summary = record.summary
+    const patientName = record.patientName || record.targetName || "System";
+    const date = record.timestamp || null;
+    const summary = record.reason
         || record.resource
-        || record.method
         || record.action?.replace(/_/g, " ")
         || "Recorded activity";
 
     return {
-        id: record.id || record._id || `${patientName}-${date || "no-date"}`,
+        id: record.id || `${patientName}-${date || "no-date"}`,
         patientName,
         date,
         summary,
         action: record.action || "ACTIVITY",
-        actor: record.actorName || record.user || record.actorRole || "System",
-        verification: record.method || record.resource || record.actorRole || "VERIFIED",
+        actor: record.actorName || record.actorRole || "System",
+        verification: record.outcome || "SUCCESS",
+        resource: record.resource || "AUDIT",
     };
 };
 
@@ -135,6 +135,7 @@ export default function PatientHistory() {
                                 <p className="text-sm"><span className="text-slate-500">Action:</span> {selectedRecord.action.replace(/_/g, " ")}</p>
                                 <p className="text-sm"><span className="text-slate-500">Actor:</span> {selectedRecord.actor}</p>
                                 <p className="text-sm"><span className="text-slate-500">Verification:</span> {selectedRecord.verification}</p>
+                                <p className="text-sm"><span className="text-slate-500">Resource:</span> {selectedRecord.resource}</p>
                             </div>
                         </div>
                         <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30">

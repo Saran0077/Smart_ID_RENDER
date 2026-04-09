@@ -181,6 +181,18 @@ export const createPatientProfile = async (req, res) => {
       message: 'Patient profile created successfully',
       patient
     });
+
+    await logAudit({
+      actor: req.user._id,
+      actorRole: req.user.role,
+      action: 'PATIENT_REGISTER',
+      patient: patient._id,
+      resource: 'PATIENT_PROFILE',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({
@@ -197,13 +209,25 @@ export const getMyPatientProfile = async (req, res) => {
       'name username role'
     );
 
-    if (!patient) {
-      return res.status(404).json({
-        message: 'Patient profile not found'
-      });
-    }
+      if (!patient) {
+        return res.status(404).json({
+          message: 'Patient profile not found'
+        });
+      }
 
-    res.json(patient);
+      await logAudit({
+        actor: req.user._id,
+        actorRole: req.user.role,
+        action: 'PATIENT_PROFILE_VIEW',
+        patient: patient._id,
+        resource: 'PATIENT_PROFILE',
+        ipAddress: req.ip,
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName
+      });
+
+      res.json(patient);
   } catch (error) {
     console.error(error);
     res.status(500).json({
@@ -247,6 +271,18 @@ export const updateMyPatientProfile = async (req, res) => {
         message: 'Patient profile not found'
       });
     }
+
+    await logAudit({
+      actor: req.user._id,
+      actorRole: req.user.role,
+      action: 'PATIENT_PROFILE_UPDATE',
+      patient: patient._id,
+      resource: 'PATIENT_PROFILE',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
 
     res.json({
       message: 'Patient profile updated successfully',
@@ -387,10 +423,17 @@ export const registerPatientByHospital = async (req, res) => {
     await logAudit({
       actor: hospitalId || req.user.id,
       actorRole: req.user.role,
-      action: 'REGISTER_PATIENT',
+      action: 'PATIENT_REGISTER',
       patient: patient[0]._id,
       resource: 'PATIENT_PROFILE',
-      ipAddress: req.ip
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient[0]._id}`,
+      targetName: patient[0].fullName,
+      metadata: {
+        nfcId: patient[0].nfcUuid,
+        fingerprintId: patient[0].fingerprintId
+      }
     });
 
     // Send temporary password via SMS if hardware bridge is configured
@@ -445,6 +488,18 @@ export const getMyPatientEMR = async (req, res) => {
       return res.status(404).json({ message: 'Patient profile not found' });
     }
 
+    await logAudit({
+      actor: userId,
+      actorRole: req.user.role,
+      action: 'PATIENT_EMR_VIEW',
+      patient: patient._id,
+      resource: 'PATIENT_EMR',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
+
     const visits = (patient.medicalHistory || [])
       .map((entry) => mapMedicalHistoryEntryToVisit(entry, patient))
       .sort((left, right) => new Date(right.date || 0) - new Date(left.date || 0));
@@ -468,6 +523,18 @@ export const getMyPatientRecords = async (req, res) => {
       return res.status(404).json({ message: 'Patient profile not found' });
     }
 
+    await logAudit({
+      actor: userId,
+      actorRole: req.user.role,
+      action: 'PATIENT_RECORDS_VIEW',
+      patient: patient._id,
+      resource: 'PATIENT_RECORDS',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
+
     res.json({
       patient: buildPatientSummary(patient),
       records: patient.medicalHistory || []
@@ -486,6 +553,18 @@ export const getMyPatientPrescriptions = async (req, res) => {
     if (!patient) {
       return res.status(404).json({ message: 'Patient profile not found' });
     }
+
+    await logAudit({
+      actor: userId,
+      actorRole: req.user.role,
+      action: 'PATIENT_PRESCRIPTIONS_VIEW',
+      patient: patient._id,
+      resource: 'PATIENT_PRESCRIPTIONS',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
 
     const prescriptions = [...(patient.medicalHistory || [])]
       .sort((left, right) => new Date(right.diagnosedDate || 0) - new Date(left.diagnosedDate || 0))
@@ -536,10 +615,17 @@ export const addClinicalNote = async (req, res) => {
     await logAudit({
       actor: userId,
       actorRole: req.user.role,
-      action: req.body.mode === 'EMERGENCY' ? 'EMERGENCY_CLINICAL_NOTE' : 'ADD_CLINICAL_NOTE',
+      action: req.body.mode === 'EMERGENCY' ? 'EMERGENCY_ACCESS' : 'CLINICAL_NOTE_ADD',
       patient: patient._id,
       resource: 'EMR_NOTE',
-      ipAddress: req.ip
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
+      metadata: {
+        mode: req.body.mode || 'STANDARD',
+        hospitalName: note.hospitalName || null
+      }
     });
 
     // Fetch updated patient for response
@@ -565,6 +651,18 @@ export const exportPatientPDF = async (req, res) => {
       return res.status(404).json({ message: 'Patient profile not found' });
     }
 
+    await logAudit({
+      actor: userId,
+      actorRole: req.user.role,
+      action: 'PATIENT_PDF_EXPORT',
+      patient: patient._id,
+      resource: 'PATIENT_PROFILE_PDF',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
+
     const pdfBuffer = await buildPatientPDF(patient);
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -584,6 +682,18 @@ export const exportMedicalHistoryPDF = async (req, res) => {
     if (!patient) {
       return res.status(404).json({ message: 'Patient profile not found' });
     }
+
+    await logAudit({
+      actor: userId,
+      actorRole: req.user.role,
+      action: 'PATIENT_PDF_EXPORT',
+      patient: patient._id,
+      resource: 'PATIENT_MEDICAL_HISTORY_PDF',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName
+    });
 
     const pdfBuffer = await buildMedicalHistoryPDF(patient);
 

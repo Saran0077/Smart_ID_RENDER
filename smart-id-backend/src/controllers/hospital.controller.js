@@ -3,7 +3,8 @@ import User from '../models/User.js';
 import AuditLog from '../models/AuditLog.js';
 import Consent from '../models/Consent.js';
 import Hospital from '../models/Hospital.js';
-import { callHardwareBridge, normalizeHardwareStatus } from '../utils/hardwareGateway.js';
+import { callHardwareBridge, normalizeHardwareStatus, pollHardwareBridge } from '../utils/hardwareGateway.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 export const authenticateEmergencyManager = async (req, res) => {
   try {
@@ -17,6 +18,19 @@ export const authenticateEmergencyManager = async (req, res) => {
 
     if (emergencyPassword && password === emergencyPassword) {
       const user = await User.findById(req.user._id || req.user.id);
+
+      await logAudit({
+        actor: req.user._id || req.user.id,
+        actorRole: req.user.role,
+        action: 'EMERGENCY_ACCESS',
+        resource: 'EMERGENCY_OVERRIDE',
+        ipAddress: req.ip,
+        targetType: 'emergency',
+        targetName: 'Emergency override authenticated',
+        metadata: {
+          method: 'emergency_password'
+        }
+      });
       
       return res.json({
         allowed: true,
@@ -39,8 +53,33 @@ export const authenticateEmergencyManager = async (req, res) => {
     const isMatch = await user.matchPassword(password);
 
     if (!isMatch) {
+      await logAudit({
+        actor: req.user._id || req.user.id,
+        actorRole: req.user.role,
+        action: 'EMERGENCY_ACCESS',
+        resource: 'EMERGENCY_OVERRIDE',
+        ipAddress: req.ip,
+        outcome: 'FAILED',
+        reason: 'Invalid password',
+        targetType: 'emergency',
+        targetName: 'Emergency override authentication'
+      });
+
       return res.status(401).json({ message: 'Invalid password' });
     }
+
+    await logAudit({
+      actor: req.user._id || req.user.id,
+      actorRole: req.user.role,
+      action: 'EMERGENCY_ACCESS',
+      resource: 'EMERGENCY_OVERRIDE',
+      ipAddress: req.ip,
+      targetType: 'emergency',
+      targetName: 'Emergency override authenticated',
+      metadata: {
+        method: 'user_password'
+      }
+    });
 
     res.json({
       allowed: true,
@@ -58,6 +97,224 @@ export const authenticateEmergencyManager = async (req, res) => {
   }
 };
 
+export const verifyEmergencyNfcCard = async (req, res) => {
+  try {
+    const { patientId, expectedUid } = req.body || {};
+
+    if (!patientId || !expectedUid) {
+      return res.status(400).json({
+        success: false,
+        code: 'EMERGENCY_CONTEXT_REQUIRED',
+        message: 'Patient session and expected NFC UID are required for emergency verification.'
+      });
+    }
+
+    const patient = await Patient.findById(patientId).populate('user', 'name username role');
+
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        code: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found for emergency verification.'
+      });
+    }
+
+    const normalizedExpectedUid = `${expectedUid}`.trim();
+    const patientUid = `${patient.nfcUuid || ''}`.trim();
+
+    if (!patientUid) {
+      return res.status(400).json({
+        success: false,
+        code: 'PATIENT_NFC_NOT_LINKED',
+        message: 'This patient does not have a linked NFC card.'
+      });
+    }
+
+    if (patientUid !== normalizedExpectedUid) {
+      return res.status(400).json({
+        success: false,
+        code: 'EMERGENCY_CONTEXT_MISMATCH',
+        message: 'The active patient session NFC UID does not match the stored patient card.'
+      });
+    }
+
+    if (!process.env.HARDWARE_BRIDGE_URL) {
+      await logAudit({
+        actor: req.user._id || req.user.id,
+        actorRole: req.user.role,
+        action: 'EMERGENCY_NFC_VERIFY',
+        patient: patient._id,
+        resource: 'NFC_READER',
+        ipAddress: req.ip,
+        outcome: 'FAILED',
+        reason: 'Hardware bridge not configured',
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName,
+        metadata: {
+          expectedUid: normalizedExpectedUid
+        }
+      });
+
+      return res.status(503).json({
+        success: false,
+        code: 'HARDWARE_NOT_CONFIGURED',
+        message: 'NFC hardware bridge is not configured.'
+      });
+    }
+
+    await logAudit({
+      actor: req.user._id || req.user.id,
+      actorRole: req.user.role,
+      action: 'EMERGENCY_NFC_VERIFY',
+      patient: patient._id,
+      resource: 'NFC_READER',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
+      metadata: {
+        phase: 'started',
+        expectedUid: normalizedExpectedUid
+      }
+    });
+
+    const scanResponse = await callHardwareBridge('/nfc/scan', {
+      method: 'POST',
+      body: {}
+    });
+
+    const pollResult = scanResponse?.operationId
+      ? await pollHardwareBridge(scanResponse.operationId)
+      : {
+          success: true,
+          nfcId: scanResponse?.uid || scanResponse?.nfcId
+        };
+
+    const scannedUid = `${pollResult?.nfcId || ''}`.trim();
+
+    if (!scannedUid) {
+      await logAudit({
+        actor: req.user._id || req.user.id,
+        actorRole: req.user.role,
+        action: 'EMERGENCY_NFC_VERIFY',
+        patient: patient._id,
+        resource: 'NFC_READER',
+        ipAddress: req.ip,
+        outcome: 'FAILED',
+        reason: 'No NFC card detected',
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName,
+        metadata: {
+          expectedUid: normalizedExpectedUid
+        }
+      });
+
+      return res.status(504).json({
+        success: false,
+        code: 'NFC_SCAN_TIMEOUT',
+        message: 'No NFC card was detected. Please tap the patient card on the reader again.'
+      });
+    }
+
+    if (scannedUid !== normalizedExpectedUid) {
+      await logAudit({
+        actor: req.user._id || req.user.id,
+        actorRole: req.user.role,
+        action: 'EMERGENCY_NFC_VERIFY',
+        patient: patient._id,
+        resource: 'NFC_READER',
+        ipAddress: req.ip,
+        outcome: 'DENIED',
+        reason: 'Scanned card does not match emergency patient',
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName,
+        metadata: {
+          expectedUid: normalizedExpectedUid,
+          scannedUid
+        }
+      });
+
+      return res.status(409).json({
+        success: false,
+        matched: false,
+        code: 'NFC_UID_MISMATCH',
+        message: 'The scanned NFC card does not belong to the active emergency patient.',
+        scannedUid,
+        expectedUid: normalizedExpectedUid
+      });
+    }
+
+    await logAudit({
+      actor: req.user._id || req.user.id,
+      actorRole: req.user.role,
+      action: 'EMERGENCY_NFC_VERIFY',
+      patient: patient._id,
+      resource: 'NFC_READER',
+      ipAddress: req.ip,
+      targetType: 'patient',
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
+      metadata: {
+        expectedUid: normalizedExpectedUid,
+        scannedUid,
+        phase: 'matched'
+      }
+    });
+
+    return res.json({
+      success: true,
+      matched: true,
+      code: 'EMERGENCY_NFC_VERIFIED',
+      message: 'Patient card verified successfully.',
+      scannedUid,
+      expectedUid: normalizedExpectedUid,
+      patient: {
+        id: patient._id,
+        name: patient.fullName,
+        fullName: patient.fullName,
+        healthId: patient.user?.username || patient.nfcUuid || 'Unknown',
+        age: patient.age,
+        gender: patient.gender,
+        bloodGroup: patient.bloodGroup,
+        phone: patient.phone,
+        nfcId: patient.nfcUuid,
+        nfcUuid: patient.nfcUuid,
+        emergencyContact: patient.emergencyContact
+      }
+    });
+  } catch (error) {
+    console.error('Emergency NFC verification error:', error);
+
+    const fallbackPatientId = req.body?.patientId || null;
+    if (fallbackPatientId) {
+      await logAudit({
+        actor: req.user._id || req.user.id,
+        actorRole: req.user.role,
+        action: 'EMERGENCY_NFC_VERIFY',
+        patient: fallbackPatientId,
+        resource: 'NFC_READER',
+        ipAddress: req.ip,
+        outcome: 'FAILED',
+        reason: error.message || 'Emergency NFC verification failed',
+        targetType: 'patient',
+        targetId: `${fallbackPatientId}`,
+        metadata: {
+          expectedUid: req.body?.expectedUid || null
+        }
+      });
+    }
+
+    return res.status(error.status || 500).json({
+      success: false,
+      code: error.status === 504 ? 'NFC_SCAN_TIMEOUT' : 'EMERGENCY_NFC_VERIFY_FAILED',
+      message: error.message || 'Emergency NFC verification failed.'
+    });
+  }
+};
+
 // Get hospital dashboard statistics
 export const getHospitalStats = async (req, res) => {
   try {
@@ -72,7 +329,7 @@ export const getHospitalStats = async (req, res) => {
     ] = await Promise.all([
       Patient.countDocuments(),
       AuditLog.countDocuments({
-        action: 'REGISTER_PATIENT',
+        action: 'PATIENT_REGISTER',
         createdAt: { $gte: today }
       }),
       Consent.countDocuments({ status: 'approved' }),
@@ -121,7 +378,7 @@ export const getPatientFlow = async (req, res) => {
       nextDate.setDate(nextDate.getDate() + 1);
 
       const count = await AuditLog.countDocuments({
-        action: { $in: ['REGISTER_PATIENT', 'VIEW_PATIENT_PROFILE', 'NFC_SCAN'] },
+        action: { $in: ['PATIENT_REGISTER', 'PATIENT_PROFILE_VIEW', 'NFC_SCAN'] },
         createdAt: { $gte: date, $lt: nextDate }
       });
 
@@ -266,12 +523,15 @@ export const createHospital = async (req, res) => {
 
     const hospital = await Hospital.create(hospitalData);
 
-    await AuditLog.create({
+    await logAudit({
       actor: req.user._id || req.user.id,
       actorRole: req.user.role,
       action: 'CREATE_HOSPITAL',
       resource: 'HOSPITAL_PROFILE',
-      ipAddress: req.ip
+      ipAddress: req.ip,
+      targetType: 'hospital',
+      targetId: `${hospital._id}`,
+      targetName: hospital.name
     });
 
     res.status(201).json({

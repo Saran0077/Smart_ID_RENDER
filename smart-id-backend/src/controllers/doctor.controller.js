@@ -6,6 +6,7 @@ import {
   normalizeHardwareStatus,
   isHardwareBridgeConfigured
 } from '../utils/hardwareGateway.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 // Get doctor dashboard statistics
 export const getDoctorStats = async (req, res) => {
@@ -22,7 +23,7 @@ export const getDoctorStats = async (req, res) => {
       Patient.countDocuments(),
       AuditLog.countDocuments({
         actor: req.user._id,
-        action: 'VIEW_PATIENT_PROFILE',
+        action: 'PATIENT_PROFILE_VIEW',
         createdAt: { $gte: today }
       }),
       Consent.countDocuments({
@@ -75,14 +76,20 @@ export const getPatientByNfc = async (req, res) => {
 
     // Log the access - with null check
     if (req.user?._id) {
-      await AuditLog.create({
+      await logAudit({
         actor: req.user._id,
         actorRole: req.user.role,
         action: 'NFC_SCAN',
         patient: patient._id,
         resource: 'PATIENT_PROFILE',
-        ipAddress: req.ip
-      }).catch(err => console.error('Audit log error:', err));
+        ipAddress: req.ip,
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName,
+        metadata: {
+          nfcId: patient.nfcUuid
+        }
+      });
     }
 
     res.json({
@@ -109,7 +116,7 @@ export const getRecentPatients = async (req, res) => {
   try {
     const logs = await AuditLog.find({
       actor: req.user._id,
-      action: 'VIEW_PATIENT_PROFILE'
+      action: 'PATIENT_PROFILE_VIEW'
     })
       .populate('patient')
       .sort({ createdAt: -1 })

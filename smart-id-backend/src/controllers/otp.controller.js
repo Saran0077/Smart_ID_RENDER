@@ -5,6 +5,7 @@ import LoginAudit from "../models/LoginAudit.js";
 import Patient from "../models/Patient.js";
 import { emitToPatient, emitToMedicalStaff } from "../config/socket.js";
 import smsService, { SMS_PROVIDERS } from "../utils/smsService.js";
+import { logAudit } from "../utils/auditLogger.js";
 
 const normalizePhone = (phone) => `${phone || ""}`.trim();
 
@@ -50,11 +51,12 @@ export const sendOtp = async (req, res) => {
         let finalPhone = normalizePhone(phone);
         let nomineeName = null;
         let patientName = null;
+        let auditPatient = null;
 
         // If nominee OTP requested, fetch nominee details from patient record
         if (isNominee && patientId) {
             const patient = await Patient.findById(patientId)
-                .select('emergencyContact fullName');
+                .select('emergencyContact fullName user');
 
             if (!patient) {
                 return res.status(404).json({
@@ -71,10 +73,11 @@ export const sendOtp = async (req, res) => {
             finalPhone = patient.emergencyContact.phone;
             nomineeName = patient.emergencyContact.name || 'Nominee';
             patientName = patient.fullName;
+            auditPatient = patient;
         }
 
         if (!isNominee && purpose === 'login') {
-            const patient = await Patient.findOne({ phone: finalPhone }).select('_id fullName');
+            const patient = await Patient.findOne({ phone: finalPhone }).select('_id fullName user');
 
             if (!patient) {
                 return res.status(404).json({
@@ -83,6 +86,14 @@ export const sendOtp = async (req, res) => {
             }
 
             patientName = patient.fullName;
+            auditPatient = patient;
+        }
+
+        if (!auditPatient && patientId) {
+            auditPatient = await Patient.findById(patientId).select('_id fullName user');
+            if (auditPatient && !patientName) {
+                patientName = auditPatient.fullName;
+            }
         }
 
         // Additional Phone-Level Protection (Security)
@@ -133,6 +144,25 @@ export const sendOtp = async (req, res) => {
                 status: "OTP_FAILED"
             });
 
+            if (auditPatient?.user) {
+                await logAudit({
+                    actor: auditPatient.user,
+                    actorRole: isNominee ? 'nominee' : 'patient',
+                    action: 'OTP_SEND',
+                    patient: auditPatient._id,
+                    resource: 'OTP_LOGIN',
+                    ipAddress: req.ip,
+                    outcome: 'FAILED',
+                    targetType: isNominee ? 'nominee' : 'patient',
+                    targetId: `${auditPatient._id}`,
+                    targetName: auditPatient.fullName,
+                    metadata: {
+                        phone: finalPhone,
+                        isNominee
+                    }
+                });
+            }
+
             if (smsService.provider !== SMS_PROVIDERS.CONSOLE) {
                 return res.status(502).json({
                     error: isNominee ? "Failed to deliver nominee OTP" : "Failed to deliver OTP"
@@ -151,6 +181,24 @@ export const sendOtp = async (req, res) => {
             userAgent: req.headers["user-agent"],
             status: isNominee ? "NOMINEE_OTP_SENT" : "OTP_SENT"
         });
+
+        if (auditPatient?.user) {
+            await logAudit({
+                actor: auditPatient.user,
+                actorRole: isNominee ? 'nominee' : 'patient',
+                action: 'OTP_SEND',
+                patient: auditPatient._id,
+                resource: 'OTP_LOGIN',
+                ipAddress: req.ip,
+                targetType: isNominee ? 'nominee' : 'patient',
+                targetId: `${auditPatient._id}`,
+                targetName: auditPatient.fullName,
+                metadata: {
+                    phone: finalPhone,
+                    isNominee
+                }
+            });
+        }
 
         // Response - OTP is NOT sent in response for security
         res.json({
@@ -229,14 +277,16 @@ export const verifyOtp = async (req, res) => {
                 // Get patient info for audit
                 let patientInfo = {};
                 if (patientId) {
-                    const patient = await Patient.findById(patientId).select('emergencyContact fullName');
-                    if (patient) {
-                        patientInfo = {
-                            nomineeName: patient.emergencyContact?.name || null,
-                            patientName: patient.fullName
-                        };
-                    }
+                    const patient = await Patient.findById(patientId).select('emergencyContact fullName user');
+                if (patient) {
+                    patientInfo = {
+                        nomineeName: patient.emergencyContact?.name || null,
+                        patientName: patient.fullName,
+                        patientUser: patient.user || null,
+                        patientDocId: patient._id
+                    };
                 }
+            }
 
                 await LoginAudit.create({
                     phone: normalizedPhone,
@@ -246,6 +296,25 @@ export const verifyOtp = async (req, res) => {
                     attempts: 3,
                     ...patientInfo
                 });
+
+                if (patientInfo.patientUser && patientInfo.patientDocId) {
+                    await logAudit({
+                        actor: patientInfo.patientUser,
+                        actorRole: isNominee ? 'nominee' : 'patient',
+                        action: 'LOGIN_FAILED',
+                        patient: patientInfo.patientDocId,
+                        resource: 'OTP_LOGIN',
+                        ipAddress: req.ip,
+                        outcome: 'FAILED',
+                        targetType: isNominee ? 'nominee' : 'patient',
+                        targetId: `${patientInfo.patientDocId}`,
+                        targetName: patientInfo.patientName,
+                        metadata: {
+                            phone: normalizedPhone,
+                            isNominee
+                        }
+                    });
+                }
 
                 return res.status(403).json({
                     error: "Too many incorrect attempts. Please request a new OTP."
@@ -268,6 +337,28 @@ export const verifyOtp = async (req, res) => {
             userAgent: req.headers["user-agent"],
             status: isNominee ? "NOMINEE_CONSENT_GRANTED" : "LOGIN_SUCCESS"
         });
+
+        const verifiedPatient = patientId
+            ? await Patient.findById(patientId).select('_id fullName user')
+            : await Patient.findOne({ phone: normalizedPhone }).select('_id fullName user');
+
+        if (verifiedPatient?.user) {
+            await logAudit({
+                actor: verifiedPatient.user,
+                actorRole: isNominee ? 'nominee' : 'patient',
+                action: isNominee ? 'CONSENT_GRANTED' : 'LOGIN_SUCCESS',
+                patient: verifiedPatient._id,
+                resource: isNominee ? 'CONSENT_OTP' : 'OTP_LOGIN',
+                ipAddress: req.ip,
+                targetType: isNominee ? 'nominee' : 'patient',
+                targetId: `${verifiedPatient._id}`,
+                targetName: verifiedPatient.fullName,
+                metadata: {
+                    phone: normalizedPhone,
+                    isNominee
+                }
+            });
+        }
 
         // If this is a consent OTP (for clinical notes), return success
         if (purpose === 'consent' || isNominee) {

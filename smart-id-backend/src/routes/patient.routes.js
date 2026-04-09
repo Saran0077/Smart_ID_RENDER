@@ -101,10 +101,13 @@ router.get(
       await logAudit({
         actor: req.user._id,
         actorRole: req.user.role,
-        action: 'VIEW_PATIENT_PROFILE',
+        action: 'PATIENT_PROFILE_VIEW',
         patient: patient._id,
         resource: 'PATIENT_PROFILE',
-        ipAddress: req.ip
+        ipAddress: req.ip,
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName
       });
 
       res.json(patient);
@@ -158,6 +161,21 @@ router.get(
       if (!patient) {
         return res.status(404).json({ message: 'Patient not found' });
       }
+
+      await logAudit({
+        actor: req.user._id,
+        actorRole: req.user.role,
+        action: 'PATIENT_PROFILE_VIEW',
+        patient: patient._id,
+        resource: 'PATIENT_PROFILE',
+        ipAddress: req.ip,
+        targetType: 'patient',
+        targetId: `${patient._id}`,
+        targetName: patient.fullName,
+        metadata: {
+          accessMode: 'nfc-direct'
+        }
+      });
       
       res.json(patient);
     } catch (error) {

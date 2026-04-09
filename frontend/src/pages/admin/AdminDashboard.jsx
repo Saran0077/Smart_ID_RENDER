@@ -63,8 +63,8 @@ export default function AdminDashboard() {
         const byDay = new Map();
 
         logs.forEach((log) => {
-            const label = log.time
-                ? new Date(log.time).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+            const label = log.timestamp
+                ? new Date(log.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })
                 : "Unknown";
             byDay.set(label, (byDay.get(label) || 0) + 1);
         });
@@ -215,11 +215,14 @@ export default function AdminDashboard() {
                                     </div>
                                     <div className="space-y-1">
                                         <div className={`text-sm font-black uppercase tracking-wide ${isDark ? "text-white" : "text-slate-900"}`}>{(log.action || "Unknown event").replace(/_/g, " ")}</div>
-                                        <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{log.user || "Unknown user"} {"->"} {log.target || "System"}</div>
+                                        <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{log.actorName || "Unknown user"} {"->"} {log.targetName || log.resource || "System"}</div>
+                                        {log.reason && (
+                                            <div className="text-xs text-rose-500">{log.reason}</div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                                    {log.time ? new Date(log.time).toLocaleString() : "N/A"}
+                                    {log.timestamp ? new Date(log.timestamp).toLocaleString() : "N/A"}
                                 </div>
                             </div>
                         )) : (

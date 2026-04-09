@@ -13,6 +13,11 @@ export default function BiometricAuth() {
     useEffect(() => {
         if (!patient || !otpVerified || !authMethod) {
             navigate("/hospital");
+            return;
+        }
+
+        if (authMethod !== "PATIENT") {
+            navigate("/hospital/clinical-note");
         }
     }, [patient, otpVerified, authMethod, navigate]);
 
@@ -42,7 +47,7 @@ export default function BiometricAuth() {
         }
     };
 
-    if (!patient || !otpVerified || !authMethod) return null;
+    if (!patient || !otpVerified || !authMethod || authMethod !== "PATIENT") return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
@@ -69,7 +74,7 @@ export default function BiometricAuth() {
 
                     <h2 className="text-3xl font-bold text-slate-800 dark:text-white">Identity Assurance</h2>
                     <p className="text-slate-500 dark:text-slate-400 mt-3 text-lg">
-                        Please verify {authMethod.toLowerCase()}'s fingerprint to unlock clinical records.
+                        Please verify the patient's fingerprint to unlock clinical records.
                     </p>
                 </div>
 
@@ -120,7 +125,7 @@ export default function BiometricAuth() {
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-6 border-t border-slate-100 dark:border-slate-800 flex items-center gap-4">
                     <span className="material-symbols-outlined text-amber-500">verified</span>
                     <p className="text-[11px] text-slate-500 font-medium leading-relaxed italic">
-                        Encryption Grade: AES-256. This device is certified for medical biometric intake. Raw fingerprint data is never stored; only cryptographic hashes are compared with the Smart-ID vault.
+                        Encryption Grade: AES-256. This biometric check is only required for patient self-consent. Raw fingerprint data is never stored; only cryptographic hashes are compared with the Smart-ID vault.
                     </p>
                 </div>
             </div>

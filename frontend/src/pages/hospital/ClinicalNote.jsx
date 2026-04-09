@@ -15,8 +15,9 @@ export default function ClinicalNote() {
     const [patientDetails, setPatientDetails] = useState(null);
     const [loadingDetails, setLoadingDetails] = useState(false);
 
-    // Guard: Must have full multi-factor verification OR active emergency override
-    const canWrite = emergency?.active || (otpVerified && fingerprintVerified);
+    const hasPatientConsent = otpVerified && fingerprintVerified && authMethod === "PATIENT";
+    const hasNomineeConsent = otpVerified && authMethod === "NOMINEE";
+    const canWrite = emergency?.active || hasPatientConsent || hasNomineeConsent;
 
     if (!patient || !canWrite) {
         return <Navigate to="/hospital" replace />;
@@ -57,7 +58,7 @@ export default function ClinicalNote() {
                 payload.mode = "STANDARD";
                 payload.consent = {
                     otp: true,
-                    biometric: true,
+                    biometric: authMethod === "PATIENT",
                     method: authMethod
                 };
             }

@@ -5,6 +5,7 @@ import {
   getRecentActivity,
   getSystemHealth,
   authenticateEmergencyManager,
+  verifyEmergencyNfcCard,
   getHospitals,
   createHospital,
   getHospitalById,
@@ -44,6 +45,7 @@ router.get('/health', authorizeRoles('hospital', 'admin'), getSystemHealth);
 
 // Emergency authentication - needs emergency_bypass permission
 router.post('/emergency/auth', authorizeRoles('hospital', 'admin'), checkPermission('emergency_bypass'), authenticateEmergencyManager);
+router.post('/emergency/verify-card', authorizeRoles('hospital', 'admin'), checkPermission('emergency_bypass'), verifyEmergencyNfcCard);
 
 // Hospital management
 router.post('/', authorizeRoles('admin', 'hospital'), createHospital);
