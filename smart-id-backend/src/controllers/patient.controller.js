@@ -120,6 +120,85 @@ const parseRequiredPositiveNumber = (value, fieldLabel) => {
   };
 };
 
+const normalizeFingerprintId = (fingerprintId) => {
+  if (fingerprintId === undefined || fingerprintId === null || fingerprintId === '') {
+    return null;
+  }
+
+  return `${fingerprintId}`;
+};
+
+let transactionSupportCache = null;
+
+const environmentSupportsTransactions = async () => {
+  if (transactionSupportCache !== null) {
+    return transactionSupportCache;
+  }
+
+  try {
+    const hello = await mongoose.connection.db.admin().command({ hello: 1 });
+    transactionSupportCache = Boolean(hello?.setName || hello?.msg === 'isdbgrid');
+  } catch (error) {
+    console.warn('Unable to determine transaction support, falling back to non-transactional registration:', error.message);
+    transactionSupportCache = false;
+  }
+
+  return transactionSupportCache;
+};
+
+const shouldCleanupFingerprint = (fingerprintId) =>
+  Boolean(fingerprintId && !`${fingerprintId}`.startsWith('SKIPPED-'));
+
+const cleanupFingerprintEnrollment = async (fingerprintId) => {
+  if (!shouldCleanupFingerprint(fingerprintId)) {
+    return {
+      fingerprintCleanupAttempted: false,
+      fingerprintCleanupSucceeded: false,
+      fingerprintCleanupReason: 'not-required'
+    };
+  }
+
+  if (!isHardwareBridgeConfigured()) {
+    return {
+      fingerprintCleanupAttempted: false,
+      fingerprintCleanupSucceeded: false,
+      fingerprintCleanupReason: 'hardware-not-configured'
+    };
+  }
+
+  const existingPatient = await Patient.findOne({ fingerprintId: normalizeFingerprintId(fingerprintId) });
+  if (existingPatient) {
+    return {
+      fingerprintCleanupAttempted: false,
+      fingerprintCleanupSucceeded: false,
+      fingerprintCleanupReason: 'linked-to-existing-patient'
+    };
+  }
+
+  try {
+    await callHardwareBridge(`/fingerprint/delete/${fingerprintId}`, {
+      method: 'DELETE'
+    });
+
+    return {
+      fingerprintCleanupAttempted: true,
+      fingerprintCleanupSucceeded: true,
+      fingerprintCleanupReason: 'deleted'
+    };
+  } catch (error) {
+    console.error('Fingerprint cleanup failed:', {
+      fingerprintId,
+      message: error.message,
+      status: error.status
+    });
+    return {
+      fingerprintCleanupAttempted: true,
+      fingerprintCleanupSucceeded: false,
+      fingerprintCleanupReason: error.message || 'cleanup-failed'
+    };
+  }
+};
+
 const buildPatientSummary = (patient) => ({
   id: patient._id,
   fullName: patient.fullName,
@@ -331,8 +410,10 @@ export const updateMyPatientProfile = async (req, res) => {
 };
 
 export const registerPatientByHospital = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  let session = null;
+  let useTransactions = false;
+  let createdUserId = null;
+  let createdPatientId = null;
   try {
     const actorId = getActorId(req);
     const {
@@ -353,58 +434,96 @@ export const registerPatientByHospital = async (req, res) => {
       address,
       fingerprintId
     } = req.body;
+    const normalizedFingerprintId = normalizeFingerprintId(fingerprintId);
+
+    useTransactions = await environmentSupportsTransactions();
+
+    if (useTransactions) {
+      session = await mongoose.startSession();
+      session.startTransaction();
+    } else {
+      console.warn('MongoDB transactions are not supported in this environment. Registration will use compensating cleanup instead.');
+    }
+
+    const failRegistration = async (status, payload, logContext = {}) => {
+      if (session) {
+        await session.abortTransaction();
+        session.endSession();
+        session = null;
+      }
+
+      const cleanupDetails = await cleanupFingerprintEnrollment(normalizedFingerprintId);
+
+      console.error('Patient registration failed:', {
+        status,
+        ...logContext,
+        fingerprintId: normalizedFingerprintId,
+        ...cleanupDetails
+      });
+
+      return res.status(status).json({
+        ...payload,
+        ...cleanupDetails
+      });
+    };
 
     if (!fullName || !dob || !gender || !phone || !bloodGroup || !nfcId) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
+      return failRegistration(400, {
         message: 'Full name, DOB, gender, phone, blood group, and NFC ID are required'
+      }, {
+        reason: 'missing-required-fields'
       });
     }
 
     const age = calculateAge(dob);
     if (age === null || age < 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
+      return failRegistration(400, {
         message: 'A valid date of birth is required'
+      }, {
+        reason: 'invalid-dob'
       });
     }
 
     const parsedHeightCm = parseRequiredPositiveNumber(heightCm, 'Height (cm)');
     if (parsedHeightCm.error) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: parsedHeightCm.error });
+      return failRegistration(400, { message: parsedHeightCm.error }, {
+        reason: 'invalid-height'
+      });
     }
 
     const parsedWeightKg = parseRequiredPositiveNumber(weightKg, 'Weight (kg)');
     if (parsedWeightKg.error) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: parsedWeightKg.error });
+      return failRegistration(400, { message: parsedWeightKg.error }, {
+        reason: 'invalid-weight'
+      });
     }
 
-    const existingPhonePatient = await Patient.findOne({ phone }).session(session);
+    const existingPhonePatient = useTransactions
+      ? await Patient.findOne({ phone }).session(session)
+      : await Patient.findOne({ phone });
     if (existingPhonePatient) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(409).json(buildRegistrationConflict('phone'));
+      return failRegistration(409, buildRegistrationConflict('phone'), {
+        reason: 'phone-conflict'
+      });
     }
 
-    const existingNfcPatient = await Patient.findOne({ nfcUuid: nfcId }).session(session);
+    const existingNfcPatient = useTransactions
+      ? await Patient.findOne({ nfcUuid: nfcId }).session(session)
+      : await Patient.findOne({ nfcUuid: nfcId });
     if (existingNfcPatient) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(409).json(buildRegistrationConflict('nfcUuid'));
+      return failRegistration(409, buildRegistrationConflict('nfcUuid'), {
+        reason: 'nfc-conflict'
+      });
     }
 
-    if (fingerprintId && !`${fingerprintId}`.startsWith('SKIPPED-')) {
-      const existingFingerprintPatient = await Patient.findOne({ fingerprintId }).session(session);
+    if (shouldCleanupFingerprint(normalizedFingerprintId)) {
+      const existingFingerprintPatient = useTransactions
+        ? await Patient.findOne({ fingerprintId: normalizedFingerprintId }).session(session)
+        : await Patient.findOne({ fingerprintId: normalizedFingerprintId });
       if (existingFingerprintPatient) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(409).json(buildRegistrationConflict('fingerprintId'));
+        return failRegistration(409, buildRegistrationConflict('fingerprintId'), {
+          reason: 'fingerprint-conflict'
+        });
       }
     }
 
@@ -412,7 +531,11 @@ export const registerPatientByHospital = async (req, res) => {
     let username = usernameBase;
     let suffix = 1;
 
-    while (await User.findOne({ username }).session(session)) {
+    while (
+      useTransactions
+        ? await User.findOne({ username }).session(session)
+        : await User.findOne({ username })
+    ) {
       username = `${usernameBase}_${suffix}`;
       suffix += 1;
     }
@@ -420,19 +543,19 @@ export const registerPatientByHospital = async (req, res) => {
     const tempPassword = crypto.randomBytes(4).toString('hex');
     const tempPasswordExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    const user = await User.create([{
+    const userPayload = {
       name: fullName,
       username,
       password: tempPassword,
       tempPassword: tempPassword,
       tempPasswordExpires: tempPasswordExpires,
       role: 'patient'
-    }], { session });
+    };
 
-    const patient = await Patient.create([{
-      user: user[0]._id,
+    const patientPayload = (userId) => ({
+      user: userId,
       nfcUuid: nfcId,
-      fingerprintId: fingerprintId || null,
+      fingerprintId: normalizedFingerprintId || null,
       fullName,
       govtId: govtId || null,
       dob: new Date(dob),
@@ -449,33 +572,60 @@ export const registerPatientByHospital = async (req, res) => {
       },
       allergies: parseAllergies(allergies),
       surgeries: parseStringList(surgeries)
-    }], { session });
+    });
 
-    await session.commitTransaction();
-    session.endSession();
+    let user;
+    let patient;
+
+    if (useTransactions) {
+      const createdUsers = await User.create([userPayload], { session });
+      user = createdUsers[0];
+      createdUserId = user._id;
+
+      const createdPatients = await Patient.create([patientPayload(user._id)], { session });
+      patient = createdPatients[0];
+      createdPatientId = patient._id;
+
+      await session.commitTransaction();
+      session.endSession();
+      session = null;
+    } else {
+      user = await User.create(userPayload);
+      createdUserId = user._id;
+
+      patient = await Patient.create(patientPayload(user._id));
+      createdPatientId = patient._id;
+    }
+
+    console.log('Patient registration succeeded:', {
+      patientId: patient._id,
+      userId: user._id,
+      fingerprintId: normalizedFingerprintId,
+      usedTransactions: useTransactions
+    });
 
     await logAudit({
       actor: actorId,
       actorRole: req.user.role,
       action: 'PATIENT_REGISTER',
-      patient: patient[0]._id,
+      patient: patient._id,
       resource: 'PATIENT_PROFILE',
       ipAddress: req.ip,
       targetType: 'patient',
-      targetId: `${patient[0]._id}`,
-      targetName: patient[0].fullName,
+      targetId: `${patient._id}`,
+      targetName: patient.fullName,
       metadata: {
-        nfcId: patient[0].nfcUuid,
-        fingerprintId: patient[0].fingerprintId
+        nfcId: patient.nfcUuid,
+        fingerprintId: patient.fingerprintId,
+        usedTransactions: useTransactions
       }
     });
 
-    // Send temporary password via SMS if hardware bridge is configured
-    if (isHardwareBridgeConfigured() && patient[0].phone) {
+    if (isHardwareBridgeConfigured() && patient.phone) {
       try {
         await callHardwareBridge('/send-sms', {
           body: {
-            phone: patient[0].phone,
+            phone: patient.phone,
             message: `Smart-ID: Your temporary password is ${tempPassword}. Use it to log in. Valid for 24 hours.`
           }
         });
@@ -486,30 +636,57 @@ export const registerPatientByHospital = async (req, res) => {
 
     res.status(201).json({
       message: 'Patient registered successfully',
-      patientId: patient[0]._id,
-      fullName: patient[0].fullName,
-      nfcId: patient[0].nfcUuid,
-      fingerprintId: patient[0].fingerprintId,
-      age: patient[0].age,
-      username: user[0].username,
+      patientId: patient._id,
+      fullName: patient.fullName,
+      nfcId: patient.nfcUuid,
+      fingerprintId: patient.fingerprintId,
+      age: patient.age,
+      username: user.username,
       temporaryPasswordHint: isHardwareBridgeConfigured()
         ? 'Sent via SMS to your registered phone'
         : 'Contact hospital admin for temporary password'
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error('Patient registration error:', error);
+    if (session) {
+      await session.abortTransaction();
+      session.endSession();
+      session = null;
+    }
+
+    if (!useTransactions && createdUserId && !createdPatientId) {
+      try {
+        await User.findByIdAndDelete(createdUserId);
+      } catch (cleanupUserError) {
+        console.error('Failed to rollback user after registration error:', cleanupUserError);
+      }
+    }
+
+    const cleanupDetails = await cleanupFingerprintEnrollment(normalizeFingerprintId(req.body.fingerprintId));
+
+    console.error('Patient registration error:', {
+      message: error.message,
+      code: error.code,
+      usedTransactions: useTransactions,
+      fingerprintId: normalizeFingerprintId(req.body.fingerprintId),
+      ...cleanupDetails
+    });
     if (error.code === 11000) {
       const duplicateField = Object.keys(error.keyPattern || {})[0] || 'unknown';
       return res.status(409).json({ 
-        ...buildRegistrationConflict(duplicateField)
+        ...buildRegistrationConflict(duplicateField),
+        ...cleanupDetails
       });
     }
     if (error.name === 'ValidationError') {
-      return res.status(400).json({ message: error.message });
+      return res.status(400).json({
+        message: error.message,
+        ...cleanupDetails
+      });
     }
-    return res.status(500).json({ message: 'Server error while registering patient' });
+    return res.status(500).json({
+      message: 'Server error while registering patient',
+      ...cleanupDetails
+    });
   }
 };
 

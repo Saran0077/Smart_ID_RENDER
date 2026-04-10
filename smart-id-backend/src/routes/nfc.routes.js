@@ -15,7 +15,8 @@ import {
     startFingerprintEnrollment,
     getFingerprintEnrollmentStatus,
     completeFingerprintEnrollment,
-    cancelFingerprintEnrollment
+    cancelFingerprintEnrollment,
+    deleteEnrolledFingerprint
 } from "../controllers/nfc.controller.js";
 
 const router = express.Router();
@@ -130,6 +131,13 @@ router.post(
   cancelFingerprintEnrollment
 );
 router.get("/enroll-cancel", methodNotAllowed(["POST"]));
+
+router.delete(
+  "/fingerprint/:fingerprintId",
+  protect,
+  authorizeRoles("hospital", "admin"),
+  deleteEnrolledFingerprint
+);
 
 
 // ==========================================

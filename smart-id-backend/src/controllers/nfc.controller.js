@@ -530,3 +530,39 @@ export const cancelFingerprintEnrollment = async (req, res) => {
     });
   }
 };
+
+export const deleteEnrolledFingerprint = async (req, res) => {
+  try {
+    const { fingerprintId } = req.params;
+
+    if (!fingerprintId) {
+      return res.status(400).json({
+        success: false,
+        message: "Fingerprint ID is required"
+      });
+    }
+
+    if (!isHardwareBridgeConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message: "Hardware not connected. Please connect R307 fingerprint scanner."
+      });
+    }
+
+    const hardwareResponse = await callHardwareBridge(`/fingerprint/delete/${fingerprintId}`, {
+      method: "DELETE"
+    });
+
+    res.json({
+      success: true,
+      fingerprintId,
+      message: hardwareResponse?.message || "Fingerprint deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting fingerprint:", error);
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || "Failed to delete fingerprint"
+    });
+  }
+};

@@ -263,6 +263,24 @@ def enroll_fingerprint_cancel():
             "message": result.get("message", "Enrollment cancelled")
         })
 
+@app.route("/fingerprint/delete/<int:fingerprint_id>", methods=["DELETE", "POST"])
+@verify_bridge_auth
+def delete_fingerprint(fingerprint_id):
+    with fingerprint_lock:
+        result = fingerprint.delete(fingerprint_id)
+
+        if result.get("success"):
+            return jsonify({
+                "success": True,
+                "deletedId": result.get("deletedId", fingerprint_id),
+                "message": result.get("message", f"Fingerprint ID {fingerprint_id} deleted")
+            })
+
+        return jsonify({
+            "success": False,
+            "error": result.get("error", "Failed to delete fingerprint")
+        }), 400
+
 @app.route("/send-sms", methods=["POST"])
 @verify_bridge_auth
 def send_sms():

@@ -116,6 +116,11 @@ const managementApi = {
         return res.data;
     },
 
+    deleteEnrolledFingerprint: async (fingerprintId) => {
+        const res = await apiNfc.delete(`/nfc/fingerprint/${fingerprintId}`);
+        return res.data;
+    },
+
     // Emergency Override
     authenticateEmergencyManager: async (credentials) => {
         const res = await api.post("/hospital/emergency/auth", credentials);

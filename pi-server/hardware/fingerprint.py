@@ -340,6 +340,9 @@ class FingerprintHardware:
                 "error": str(e)
             }
 
+    def remove(self, fingerprint_id: int) -> Dict[str, Any]:
+        return self.delete(fingerprint_id)
+
     def cancel_enrollment(self):
         self._reset_enrollment()
         return {"success": True, "message": "Enrollment cancelled"}
