@@ -19,7 +19,7 @@ import hospitalRoutes from './routes/hospital.routes.js';
 import doctorRoutes from './routes/doctor.routes.js';
 
 // Rate limiters
-import { authLimiter, otpLimiter } from './middleware/rateLimit.js';
+import { authLimiter } from './middleware/rateLimit.js';
 
 // Middleware
 import { protect } from './middleware/auth.middleware.js';
@@ -106,8 +106,8 @@ app.use((req, res, next) => {
 // Auth Routes (Username/Password) - Rate limited
 app.use('/api/auth', authLimiter, authRoutes);
 
-// OTP Routes (Phone/SMS) - Rate limited
-app.use('/api/otp', otpLimiter, otpRoutes);
+// OTP Routes (Phone/SMS) - rate limiting is applied per-route
+app.use('/api/otp', otpRoutes);
 
 // Patient Profile Routes
 app.use('/api/patient', patientRoutes);

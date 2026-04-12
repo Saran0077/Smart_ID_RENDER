@@ -29,7 +29,7 @@ const managementApi = {
             purpose: 'consent',
             isNominee: false,
             patientId 
-        });
+        }, { timeout: 45000 });
         return res.data;
     },
     
@@ -40,7 +40,7 @@ const managementApi = {
             purpose: 'consent',
             isNominee: true,
             patientId 
-        });
+        }, { timeout: 45000 });
         return res.data;
     },
     
@@ -75,7 +75,7 @@ const managementApi = {
             purpose: 'consent',
             isNominee,
             patientId 
-        });
+        }, { timeout: 45000 });
         return res.data;
     },
 

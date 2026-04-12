@@ -60,8 +60,10 @@ export default function OtpAuth() {
             const response = isNominee
                 ? await hospitalAPI.sendNomineeOtp(phone, patientId)
                 : await hospitalAPI.sendOtp(phone, patientId);
-            
-            if (response.success) {
+
+            const wasSuccessful = response?.success === true || response?.status === "success";
+
+            if (wasSuccessful) {
                 toast.success(response.message);
                 setOtpSent(true);
                 setResendTimer(RESEND_TIMER_SECONDS);
@@ -71,7 +73,16 @@ export default function OtpAuth() {
                 return false;
             }
         } catch (err) {
-            const errorMsg = err.response?.data?.error || err.response?.data?.message || "Failed to send OTP";
+            const isTimeout = err.code === "ECONNABORTED" || err.message?.toLowerCase().includes("timeout");
+            const errorMsg = isTimeout
+                ? "OTP request timed out. If the SMS already arrived, enter it below."
+                : err.response?.data?.error || err.response?.data?.message || "Failed to send OTP";
+
+            if (isTimeout) {
+                setOtpSent(true);
+                setResendTimer(RESEND_TIMER_SECONDS);
+            }
+
             setError(errorMsg);
             toast.error(errorMsg);
             return false;
