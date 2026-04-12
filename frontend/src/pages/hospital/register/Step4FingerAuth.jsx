@@ -208,9 +208,19 @@ export default function Step4FingerAuth() {
 
             setEnrollmentState(STATES.ERROR);
             if (err.response?.status === 409) {
+                const conflictField = err.response?.data?.field || "unknown";
+                const conflictLabelMap = {
+                    govtId: "government ID",
+                    phone: "phone number",
+                    nfcUuid: "NFC card",
+                    fingerprintId: "fingerprint",
+                    username: "patient username"
+                };
+
                 setRegistrationConflict({
                     code: err.response?.data?.code || "PATIENT_DUPLICATE_CONFLICT",
-                    field: err.response?.data?.field || "unknown",
+                    field: conflictField,
+                    fieldLabel: conflictLabelMap[conflictField] || "registration data",
                     message: failureDetails.message,
                     cleanupAttempted: failureDetails.cleanupAttempted,
                     cleanupSucceeded: failureDetails.cleanupSucceeded,
@@ -554,6 +564,11 @@ export default function Step4FingerAuth() {
                             <p className="mt-1 text-sm font-medium text-amber-700 dark:text-amber-300">
                                 Fingerprint enrollment succeeded with ID {fingerId}, but patient registration failed: {registrationConflict.message}
                             </p>
+                            {registrationConflict.fieldLabel && (
+                                <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                                    Conflicting field: {registrationConflict.fieldLabel}
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>

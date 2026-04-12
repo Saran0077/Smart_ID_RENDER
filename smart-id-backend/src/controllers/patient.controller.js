@@ -358,6 +358,27 @@ const buildRegistrationConflict = (field) => {
   }
 };
 
+const inferDuplicateField = (error) => {
+  const keyPatternField = Object.keys(error?.keyPattern || {})[0];
+  if (keyPatternField) {
+    return keyPatternField;
+  }
+
+  const keyValueField = Object.keys(error?.keyValue || {})[0];
+  if (keyValueField) {
+    return keyValueField;
+  }
+
+  const duplicateMessage = `${error?.message || error?.errmsg || ""}`;
+  if (duplicateMessage.includes("govtId")) return "govtId";
+  if (duplicateMessage.includes("phone")) return "phone";
+  if (duplicateMessage.includes("nfcUuid")) return "nfcUuid";
+  if (duplicateMessage.includes("fingerprintId")) return "fingerprintId";
+  if (duplicateMessage.includes("username")) return "username";
+
+  return "unknown";
+};
+
 const mapMedicalHistoryEntryToVisit = (entry, patient) => ({
   hospital: getHospitalDisplayName(entry),
   doctor: getAuthorDisplayName(entry),
@@ -797,9 +818,10 @@ export const registerPatientByHospital = async (req, res) => {
       ...cleanupDetails
     });
     if (error.code === 11000) {
-      const duplicateField = Object.keys(error.keyPattern || {})[0] || 'unknown';
+      const duplicateField = inferDuplicateField(error);
       return res.status(409).json({ 
         ...buildRegistrationConflict(duplicateField),
+        duplicateValue: error?.keyValue?.[duplicateField] ?? null,
         ...cleanupDetails
       });
     }
