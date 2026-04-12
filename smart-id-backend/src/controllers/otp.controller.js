@@ -126,9 +126,12 @@ export const sendOtp = async (req, res) => {
             ? SMS_MESSAGES.NOMINEE(otp, patientName)
             : SMS_MESSAGES.PATIENT(otp);
 
+        let smsDelivered = false;
+
         try {
             const smsResult = await smsService.send(finalPhone, smsMessage);
             console.log('SMS sent successfully:', smsResult.messageId);
+            smsDelivered = true;
         } catch (smsError) {
             console.error('SMS send failed:', smsError.message);
             console.warn('OTP generated but SMS delivery failed. OTP:', otp);
@@ -168,36 +171,43 @@ export const sendOtp = async (req, res) => {
                     error: isNominee ? "Failed to deliver nominee OTP" : "Failed to deliver OTP"
                 });
             }
+
+            smsDelivered = true;
         }
 
-        // Record Audit Event
-        await LoginAudit.create({
-            phone: finalPhone,
-            isNominee,
-            nomineeName: nomineeName || null,
-            patientName: patientName || null,
-            patientId: patientId || null,
-            ip: req.ip,
-            userAgent: req.headers["user-agent"],
-            status: isNominee ? "NOMINEE_OTP_SENT" : "OTP_SENT"
-        });
-
-        if (auditPatient?.user) {
-            await logAudit({
-                actor: auditPatient.user,
-                actorRole: isNominee ? 'nominee' : 'patient',
-                action: 'OTP_SEND',
-                patient: auditPatient._id,
-                resource: 'OTP_LOGIN',
-                ipAddress: req.ip,
-                targetType: isNominee ? 'nominee' : 'patient',
-                targetId: `${auditPatient._id}`,
-                targetName: auditPatient.fullName,
-                metadata: {
+        if (smsDelivered) {
+            try {
+                await LoginAudit.create({
                     phone: finalPhone,
-                    isNominee
+                    isNominee,
+                    nomineeName: nomineeName || null,
+                    patientName: patientName || null,
+                    patientId: patientId || null,
+                    ip: req.ip,
+                    userAgent: req.headers["user-agent"],
+                    status: isNominee ? "NOMINEE_OTP_SENT" : "OTP_SENT"
+                });
+
+                if (auditPatient?.user) {
+                    await logAudit({
+                        actor: auditPatient.user,
+                        actorRole: isNominee ? 'nominee' : 'patient',
+                        action: 'OTP_SEND',
+                        patient: auditPatient._id,
+                        resource: 'OTP_LOGIN',
+                        ipAddress: req.ip,
+                        targetType: isNominee ? 'nominee' : 'patient',
+                        targetId: `${auditPatient._id}`,
+                        targetName: auditPatient.fullName,
+                        metadata: {
+                            phone: finalPhone,
+                            isNominee
+                        }
+                    });
                 }
-            });
+            } catch (auditError) {
+                console.warn('OTP send bookkeeping failed:', auditError.message);
+            }
         }
 
         // Response - OTP is NOT sent in response for security
@@ -233,7 +243,7 @@ export const sendOtp = async (req, res) => {
     } catch (err) {
         console.error(err.response?.data || err);
         res.status(500).json({
-            error: "SMS sending failed"
+            error: "Failed to process OTP request"
         });
     }
 };
