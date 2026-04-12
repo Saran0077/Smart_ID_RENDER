@@ -11,6 +11,7 @@ export default function RegisterSuccess() {
     }
 
     const {
+        registration,
         patientName,
         fullName,
         patientId,
@@ -31,7 +32,23 @@ export default function RegisterSuccess() {
         fingerprintEnrolled,
     } = state;
 
-    const resolvedPatientName = patientName || fullName || "Patient";
+    const patient = registration?.patient || {};
+    const resolvedPatientName = patientName || registration?.patientName || patient.fullName || fullName || "Patient";
+    const resolvedPatientId = registration?.patientId || patientId;
+    const resolvedNfcId = registration?.nfcId || patient.nfcId || nfcId;
+    const resolvedGovtId = patient.govtId || govtId;
+    const resolvedDob = patient.dob || dob;
+    const resolvedAge = patient.age || age;
+    const resolvedGender = patient.gender || gender;
+    const resolvedPhone = patient.phone || phone;
+    const resolvedEmergencyName = patient.emergencyContact?.name || emergencyName;
+    const resolvedEmergencyPhone = patient.emergencyContact?.phone || emergencyPhone;
+    const resolvedBloodGroup = patient.bloodGroup || bloodGroup;
+    const resolvedHeightCm = patient.heightCm || heightCm;
+    const resolvedWeightKg = patient.weightKg || weightKg;
+    const resolvedAllergies = Array.isArray(patient.allergies) ? patient.allergies.join(", ") : allergies;
+    const resolvedSurgeries = Array.isArray(patient.surgeries) ? patient.surgeries.join(", ") : surgeries;
+    const resolvedFingerprintEnrolled = registration?.fingerprintEnrolled ?? fingerprintEnrolled;
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
@@ -66,18 +83,18 @@ export default function RegisterSuccess() {
 
                     <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-md mx-auto">
                         Patient <span className="font-bold text-slate-900 dark:text-white">{resolvedPatientName}</span>{" "}
-                        has been successfully registered{fingerprintEnrolled ? " with biometric fingerprint enrolled" : ""} and their Smart-ID card is now active.
+                        has been successfully registered{resolvedFingerprintEnrolled ? " with biometric fingerprint enrolled" : ""} and their Smart-ID card is now active.
                     </p>
 
                     {/* Summary Card */}
                     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 text-left mb-10 shadow-lg shadow-slate-200/50 dark:shadow-none space-y-4">
                         <div className="flex justify-between py-4 border-b border-slate-100 dark:border-slate-800">
                             <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Patient ID</span>
-                            <span className="font-mono font-bold text-slate-800 dark:text-emerald-400">{patientId}</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-emerald-400">{resolvedPatientId}</span>
                         </div>
                         <div className="flex justify-between py-4 border-b border-slate-100 dark:border-slate-800 gap-4">
                             <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Government ID</span>
-                            <span className="font-mono font-bold text-slate-800 dark:text-white text-right">{govtId}</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-white text-right">{resolvedGovtId}</span>
                         </div>
                         <div className="flex justify-between py-4 border-b border-slate-100 dark:border-slate-800">
                             <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">NFC Card Number</span>
@@ -85,17 +102,17 @@ export default function RegisterSuccess() {
                                 <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-400 text-sm">
                                     contactless
                                 </span>
-                                {nfcId}
+                                {resolvedNfcId}
                             </span>
                         </div>
                         <div className="flex justify-between py-4 border-b border-slate-100 dark:border-slate-800">
                             <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Blood Group</span>
-                            <span className="font-bold text-slate-800 dark:text-white">{bloodGroup}</span>
+                            <span className="font-bold text-slate-800 dark:text-white">{resolvedBloodGroup}</span>
                         </div>
                         <div className="flex justify-between py-4 border-b border-slate-100 dark:border-slate-800">
                             <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">Fingerprint</span>
                             <span className="flex items-center gap-2">
-                                {fingerprintEnrolled ? (
+                                {resolvedFingerprintEnrolled ? (
                                     <>
                                         <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-400 text-sm">fingerprint</span>
                                         <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
@@ -119,42 +136,42 @@ export default function RegisterSuccess() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Date of Birth</div>
-                                <div className="text-lg font-bold text-slate-800 dark:text-white">{dob ? new Date(dob).toLocaleDateString() : '-'}</div>
+                                <div className="text-lg font-bold text-slate-800 dark:text-white">{resolvedDob ? new Date(resolvedDob).toLocaleDateString() : '-'}</div>
                             </div>
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Age / Gender</div>
-                                <div className="text-lg font-bold text-slate-800 dark:text-white">{age || '-'} / {gender || '-'}</div>
+                                <div className="text-lg font-bold text-slate-800 dark:text-white">{resolvedAge || '-'} / {resolvedGender || '-'}</div>
                             </div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Height</div>
-                                <div className="text-lg font-bold text-slate-800 dark:text-white">{heightCm} cm</div>
+                                <div className="text-lg font-bold text-slate-800 dark:text-white">{resolvedHeightCm} cm</div>
                             </div>
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Weight</div>
-                                <div className="text-lg font-bold text-slate-800 dark:text-white">{weightKg} kg</div>
+                                <div className="text-lg font-bold text-slate-800 dark:text-white">{resolvedWeightKg} kg</div>
                             </div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Phone</div>
-                                <div className="text-lg font-bold text-slate-800 dark:text-white break-all">{phone}</div>
+                                <div className="text-lg font-bold text-slate-800 dark:text-white break-all">{resolvedPhone}</div>
                             </div>
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Emergency Contact</div>
-                                <div className="text-sm font-bold text-slate-800 dark:text-white">{emergencyName || '-'}</div>
-                                <div className="text-sm text-slate-500 dark:text-slate-400">{emergencyPhone || '-'}</div>
+                                <div className="text-sm font-bold text-slate-800 dark:text-white">{resolvedEmergencyName || '-'}</div>
+                                <div className="text-sm text-slate-500 dark:text-slate-400">{resolvedEmergencyPhone || '-'}</div>
                             </div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Allergies</div>
-                                <div className="text-sm font-medium text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{allergies || 'None recorded'}</div>
+                                <div className="text-sm font-medium text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{resolvedAllergies || 'None recorded'}</div>
                             </div>
                             <div className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Surgeries</div>
-                                <div className="text-sm font-medium text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{surgeries || 'None recorded'}</div>
+                                <div className="text-sm font-medium text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{resolvedSurgeries || 'None recorded'}</div>
                             </div>
                         </div>
                     </div>

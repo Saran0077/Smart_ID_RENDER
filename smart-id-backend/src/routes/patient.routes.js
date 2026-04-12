@@ -4,6 +4,7 @@ import {
   createPatientProfile,
   getMyPatientProfile,
   updateMyPatientProfile,
+  validatePatientRegistrationByHospital,
   registerPatientByHospital,
   getMyPatientEMR,
   getMyPatientRecords,
@@ -25,6 +26,14 @@ const router = express.Router();
 // ===============================
 
 // 🟢 Create patient profile (Patient only)
+router.post(
+  '/register/validate',
+  protect,
+  authorizeRoles('hospital'),
+  checkPermission('patient_register'),
+  validatePatientRegistrationByHospital
+);
+
 router.post(
   '/register',
   protect,

@@ -16,7 +16,7 @@ const STATES = {
 const TIMEOUT_SECONDS = 30;
 const POLL_INTERVAL = 2000;
 
-const buildRegistrationPayload = (registrationData, fingerprintId) => {
+const buildRegistrationPayload = (registrationData, fingerprintId = null) => {
     const { email: _email, ...contactWithoutEmail } = registrationData.contact || {};
 
     return {
@@ -24,7 +24,7 @@ const buildRegistrationPayload = (registrationData, fingerprintId) => {
         ...contactWithoutEmail,
         ...registrationData.medical,
         nfcId: registrationData.nfcId,
-        fingerprintId
+        ...(fingerprintId ? { fingerprintId } : {})
     };
 };
 
@@ -37,7 +37,7 @@ const getRegistrationFailureDetails = (error) => {
     let message =
         responseData.message ||
         error.message ||
-        "Patient registration failed. Fingerprint enrolled but please retry registration.";
+        "Patient registration failed after fingerprint enrollment.";
 
     if (cleanupAttempted && cleanupSucceeded) {
         message += " The enrolled fingerprint was removed from the sensor.";
@@ -57,16 +57,22 @@ const getRegistrationFailureDetails = (error) => {
 
 export default function Step4FingerAuth() {
     const navigate = useNavigate();
-    const { data, update } = usePatientRegistration();
+    const {
+        data,
+        updateValue,
+        markStepComplete,
+        clearDraft,
+        canAccessStep,
+        getFirstIncompleteStepPath
+    } = usePatientRegistration();
     useAuth();
 
     const [enrollState, setEnrollState] = useState(STATES.IDLE);
     const [errorMessage, setErrorMessage] = useState("");
     const [fingerId, setFingerId] = useState(null);
     const [timeLeft, setTimeLeft] = useState(TIMEOUT_SECONDS);
-    const [showSkipOption, setShowSkipOption] = useState(false);
-    const [skipLoading, setSkipLoading] = useState(false);
     const [registrationConflict, setRegistrationConflict] = useState(null);
+    const [registrationResult, setRegistrationResult] = useState(data.registrationResult || null);
 
     const countdownRef = useRef(null);
     const timeoutRef = useRef(null);
@@ -114,7 +120,7 @@ export default function Step4FingerAuth() {
         countdownActiveRef.current = true;
 
         countdownRef.current = setInterval(() => {
-            setTimeLeft(prev => {
+            setTimeLeft((prev) => {
                 if (prev <= 1) {
                     clearInterval(countdownRef.current);
                     countdownRef.current = null;
@@ -145,11 +151,15 @@ export default function Step4FingerAuth() {
     }, [startCountdown]);
 
     useEffect(() => {
+        if (!canAccessStep("fingerprint")) {
+            navigate(getFirstIncompleteStepPath(), { replace: true });
+        }
+
         return () => {
             clearCountdownTimers();
             clearPollingTimer();
         };
-    }, [clearCountdownTimers, clearPollingTimer]);
+    }, [canAccessStep, clearCountdownTimers, clearPollingTimer, getFirstIncompleteStepPath, navigate]);
 
     const handleEnrollmentFailure = useCallback(async (message) => {
         clearCountdownTimers();
@@ -167,23 +177,30 @@ export default function Step4FingerAuth() {
         }
     }, [clearCountdownTimers, clearPollingTimer, setEnrollmentState]);
 
-    const runPatientRegistration = useCallback(async (finalFingerprintId, fingerprintEnrolled) => {
+    const runPatientRegistration = useCallback(async (finalFingerprintId) => {
         if (hasSubmittedRegistrationRef.current) {
             return;
         }
 
         hasSubmittedRegistrationRef.current = true;
         setFingerId(finalFingerprintId);
-        update("fingerprintId", finalFingerprintId);
-        update("fingerprintEnrolled", fingerprintEnrolled);
+        updateValue("fingerprintId", finalFingerprintId);
         setRegistrationConflict(null);
         setEnrollmentState(STATES.REGISTERING);
 
         try {
             const registrationPayload = buildRegistrationPayload(data, finalFingerprintId);
             const registerResponse = await hospitalAPI.registerPatient(registrationPayload);
+            const nextRegistrationResult = {
+                ...registerResponse,
+                fingerprintEnrolled: true,
+                patientName: registerResponse?.patient?.fullName || registerResponse?.fullName || data.personal?.fullName || "",
+            };
 
-            update("patientId", registerResponse.patientId);
+            updateValue("patientId", registerResponse.patientId);
+            updateValue("registrationResult", nextRegistrationResult);
+            markStepComplete("fingerprint", true);
+            setRegistrationResult(nextRegistrationResult);
             setEnrollmentState(STATES.SUCCESS);
         } catch (err) {
             console.error("Registration error:", err);
@@ -206,7 +223,7 @@ export default function Step4FingerAuth() {
             setErrorMessage(failureDetails.message);
             hasSubmittedRegistrationRef.current = false;
         }
-    }, [data, setEnrollmentState, update]);
+    }, [data, markStepComplete, setEnrollmentState, updateValue]);
 
     const handleEnrollmentComplete = useCallback(async (newFingerId) => {
         if (hasCompletedEnrollmentRef.current) {
@@ -219,12 +236,12 @@ export default function Step4FingerAuth() {
 
         if (!newFingerId) {
             setEnrollmentState(STATES.ERROR);
-            setErrorMessage("Enrollment completed but fingerprint ID not received");
+            setErrorMessage("Enrollment completed but fingerprint ID not received.");
             hasSubmittedRegistrationRef.current = false;
             return;
         }
 
-        await runPatientRegistration(`${newFingerId}`, true);
+        await runPatientRegistration(`${newFingerId}`);
     }, [clearCountdownTimers, clearPollingTimer, runPatientRegistration, setEnrollmentState]);
 
     const handleStartEnrollment = useCallback(async () => {
@@ -236,10 +253,13 @@ export default function Step4FingerAuth() {
         setRegistrationConflict(null);
         setFingerId(null);
         setTimeLeft(TIMEOUT_SECONDS);
-        setShowSkipOption(false);
-        update("patientId", null);
+        setRegistrationResult(null);
+        updateValue("patientId", null);
+        updateValue("registrationResult", null);
 
         try {
+            await hospitalAPI.validatePatientRegistration(buildRegistrationPayload(data));
+
             const response = await hospitalAPI.startFingerprintEnrollment();
 
             if (!response.success) {
@@ -307,11 +327,10 @@ export default function Step4FingerAuth() {
                     }
 
                     if (status === 503 && errorCode === "HARDWARE_NOT_CONFIGURED") {
-                        setShowSkipOption(true);
                         clearCountdownTimers();
                         clearPollingTimer();
                         setEnrollmentState(STATES.ERROR);
-                        setErrorMessage("Hardware bridge not configured. You can skip this step for testing.");
+                        setErrorMessage("Fingerprint hardware bridge is not configured.");
                         return;
                     }
 
@@ -323,11 +342,10 @@ export default function Step4FingerAuth() {
                     if (status === 400) {
                         const backendMessage = err.response?.data?.error || err.response?.data?.message;
                         if (backendMessage?.includes("not initialized") || backendMessage?.includes("sensor")) {
-                            setShowSkipOption(true);
-                            setErrorMessage("Fingerprint sensor not connected or not initialized. You can skip this step for testing.");
                             clearCountdownTimers();
                             clearPollingTimer();
                             setEnrollmentState(STATES.ERROR);
+                            setErrorMessage("Fingerprint sensor not connected or not initialized.");
                             return;
                         }
 
@@ -360,8 +378,7 @@ export default function Step4FingerAuth() {
             let message;
 
             if (status === 503 && errorCode === "HARDWARE_NOT_CONFIGURED") {
-                message = "Hardware bridge not configured. You can skip this step for testing.";
-                setShowSkipOption(true);
+                message = "Fingerprint hardware bridge is not configured.";
             } else if (
                 status === 400 &&
                 (
@@ -371,18 +388,15 @@ export default function Step4FingerAuth() {
                     err.response?.data?.message?.includes("sensor")
                 )
             ) {
-                message = "Fingerprint sensor not connected or not initialized. You can skip this step for testing.";
-                setShowSkipOption(true);
+                message = "Fingerprint sensor not connected or not initialized.";
             } else if (isTimeout || status === 504) {
                 message = "Scanner timeout. Please check hardware connection.";
             } else if (status === 401) {
                 message = "Hardware authentication failed. Please contact administrator.";
             } else if (status === 503) {
                 message = "Scanner service unavailable. Please check hardware.";
-            } else if (status === 400) {
-                message = err.response?.data?.error || err.response?.data?.message || "Failed to start enrollment.";
             } else {
-                message = err.response?.data?.message || err.message || "Failed to start enrollment. Please try again.";
+                message = err.response?.data?.message || err.response?.data?.error || err.message || "Failed to start enrollment. Please try again.";
             }
 
             await handleEnrollmentFailure(message);
@@ -390,13 +404,14 @@ export default function Step4FingerAuth() {
     }, [
         clearCountdownTimers,
         clearPollingTimer,
+        data,
         ensureCountdownRunning,
         handleEnrollmentComplete,
         handleEnrollmentFailure,
         resetOperationGuards,
         setEnrollmentState,
         startCountdown,
-        update
+        updateValue
     ]);
 
     const handleRetry = async () => {
@@ -407,7 +422,7 @@ export default function Step4FingerAuth() {
         setRegistrationConflict(null);
         setFingerId(null);
         setTimeLeft(TIMEOUT_SECONDS);
-        setShowSkipOption(false);
+        setRegistrationResult(null);
 
         try {
             await hospitalAPI.cancelFingerprintEnrollment();
@@ -419,38 +434,24 @@ export default function Step4FingerAuth() {
         setEnrollmentState(STATES.IDLE);
     };
 
-    const handleSkipFingerprint = async () => {
-        setSkipLoading(true);
-        try {
-            const skippedFingerId = `SKIPPED-${Date.now()}`;
-            await runPatientRegistration(skippedFingerId, false);
-        } catch (err) {
-            console.error("Skip error:", err);
-            setErrorMessage("Failed to skip. Please try again.");
-        } finally {
-            setSkipLoading(false);
-        }
-    };
-
     const handleCompleteRegistration = () => {
-        if (!data.patientId) {
+        const completedRegistration = registrationResult || data.registrationResult;
+
+        if (!data.patientId || !completedRegistration) {
             setEnrollmentState(STATES.ERROR);
             setErrorMessage("Patient registration is not complete yet. Please retry before leaving this page.");
             return;
         }
 
-        const isSkipped = fingerId?.startsWith("SKIPPED-");
-        const patientName = data.personal?.fullName || "";
+        clearDraft();
         navigate("/hospital/register/success", {
             state: {
-                ...data.personal,
-                ...data.contact,
-                ...data.medical,
-                patientId: data.patientId,
-                patientName,
-                nfcId: data.nfcId,
+                registration: completedRegistration,
+                patientId: completedRegistration.patientId || data.patientId,
+                patientName: completedRegistration.patientName,
+                nfcId: completedRegistration.nfcId || data.nfcId,
                 fingerId,
-                fingerprintEnrolled: !isSkipped
+                fingerprintEnrolled: true
             }
         });
     };
@@ -534,11 +535,11 @@ export default function Step4FingerAuth() {
                     </h4>
                     <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
                         {enrollState === STATES.SUCCESS
-                            ? "Fingerprint status is reconciled. Click Complete Registration to finish."
+                            ? "Fingerprint enrollment and patient registration are complete. Click Complete Registration to finish."
                             : enrollState === STATES.ERROR
                                 ? errorMessage
                                 : enrollState === STATES.ENROLLING
-                                    ? "Initializing fingerprint scanner..."
+                                    ? "Validating registration data and initializing the fingerprint scanner..."
                                     : showProgress
                                         ? "Processing enrollment and registering patient..."
                                         : showScanning
@@ -632,16 +633,6 @@ export default function Step4FingerAuth() {
                         <span className="material-symbols-outlined">restart_alt</span>
                         Start Over
                     </button>
-                    {showSkipOption && (
-                        <button
-                            onClick={handleSkipFingerprint}
-                            disabled={skipLoading}
-                            className="px-8 py-3 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-bold rounded-xl hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-all flex items-center gap-2 disabled:opacity-50"
-                        >
-                            <span className="material-symbols-outlined">skip_next</span>
-                            {skipLoading ? "Skipping..." : "Skip for Testing"}
-                        </button>
-                    )}
                 </div>
             )}
 
@@ -668,9 +659,7 @@ export default function Step4FingerAuth() {
                         </div>
                         <div className="flex items-center gap-1.5">
                             <div className="size-2.5 bg-emerald-500 rounded-full animate-pulse"></div>
-                            <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                                {fingerId.startsWith("SKIPPED-") ? "Skipped" : "Enrolled"}
-                            </span>
+                            <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Enrolled</span>
                         </div>
                     </div>
                 </div>

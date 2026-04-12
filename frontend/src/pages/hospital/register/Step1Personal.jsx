@@ -1,14 +1,29 @@
+import { useState } from "react";
 import { usePatientRegistration } from "../../../context/PatientRegistrationContext";
 import { useNavigate } from "react-router-dom";
 
 export default function Step1Personal() {
-    const { data, update } = usePatientRegistration();
+    const { data, updateSection, markStepComplete } = usePatientRegistration();
     const navigate = useNavigate();
+    const [error, setError] = useState("");
 
     const submit = (e) => {
         e.preventDefault();
         const formData = new FormData(e.target);
-        update("personal", Object.fromEntries(formData.entries()));
+        const values = Object.fromEntries(formData.entries());
+
+        if (!values.fullName?.trim() || !values.dob || !values.govtId?.trim() || !values.gender) {
+            setError("Complete all personal details before continuing.");
+            return;
+        }
+
+        updateSection("personal", {
+            fullName: values.fullName.trim(),
+            dob: values.dob,
+            govtId: values.govtId.trim(),
+            gender: values.gender,
+        });
+        markStepComplete("personal", true);
         navigate("/hospital/register/contact");
     };
 
@@ -20,6 +35,11 @@ export default function Step1Personal() {
             </div>
 
             <form onSubmit={submit} className="space-y-4">
+                {error && (
+                    <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+                        {error}
+                    </p>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                         <label className="text-xs font-bold text-slate-500 uppercase">Full Name</label>

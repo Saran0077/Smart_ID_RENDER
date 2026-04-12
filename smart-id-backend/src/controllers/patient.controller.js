@@ -98,6 +98,26 @@ const parseOptionalPositiveNumber = (value) => {
   return parsed;
 };
 
+const normalizeText = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  return `${value}`.trim();
+};
+
+const normalizePhoneNumber = (value) => {
+  const normalized = normalizeText(value).replace(/[^\d+]/g, '');
+  return normalized;
+};
+
+const normalizeGovtId = (value) => {
+  const normalized = normalizeText(value);
+  return normalized ? normalized.toUpperCase() : '';
+};
+
+const isValidPhoneNumber = (value) => /^\+?\d{10,15}$/.test(value);
+
 const parseRequiredPositiveNumber = (value, fieldLabel) => {
   if (value === undefined || value === null || value === '') {
     return {
@@ -128,6 +148,92 @@ const normalizeFingerprintId = (fingerprintId) => {
   return `${fingerprintId}`;
 };
 
+const isRealFingerprintId = (fingerprintId) => Boolean(normalizeFingerprintId(fingerprintId));
+
+const validateHospitalRegistrationInput = (payload, { requireFingerprint = false } = {}) => {
+  const normalized = {
+    fullName: normalizeText(payload.fullName),
+    dob: payload.dob,
+    gender: normalizeText(payload.gender).toLowerCase(),
+    phone: normalizePhoneNumber(payload.phone),
+    bloodGroup: normalizeText(payload.bloodGroup),
+    emergencyName: normalizeText(payload.emergencyName),
+    emergencyPhone: normalizePhoneNumber(payload.emergencyPhone),
+    allergies: payload.allergies,
+    surgeries: payload.surgeries,
+    heightCm: payload.heightCm,
+    weightKg: payload.weightKg,
+    nfcId: normalizeText(payload.nfcId),
+    govtId: normalizeGovtId(payload.govtId),
+    address: normalizeText(payload.address),
+    fingerprintId: normalizeFingerprintId(payload.fingerprintId)
+  };
+
+  const requiredFields = [
+    ['fullName', normalized.fullName, 'Full name is required'],
+    ['dob', normalized.dob, 'Date of birth is required'],
+    ['gender', normalized.gender, 'Gender is required'],
+    ['govtId', normalized.govtId, 'Government ID is required'],
+    ['phone', normalized.phone, 'Phone number is required'],
+    ['address', normalized.address, 'Address is required'],
+    ['emergencyName', normalized.emergencyName, 'Emergency contact name is required'],
+    ['emergencyPhone', normalized.emergencyPhone, 'Emergency contact phone is required'],
+    ['bloodGroup', normalized.bloodGroup, 'Blood group is required'],
+    ['nfcId', normalized.nfcId, 'NFC ID is required']
+  ];
+
+  for (const [field, value, message] of requiredFields) {
+    if (!value) {
+      return { normalized, error: { field, message } };
+    }
+  }
+
+  if (!['male', 'female', 'other'].includes(normalized.gender)) {
+    return {
+      normalized,
+      error: {
+        field: 'gender',
+        message: 'Gender must be one of male, female, or other'
+      }
+    };
+  }
+
+  if (!isValidPhoneNumber(normalized.phone)) {
+    return {
+      normalized,
+      error: {
+        field: 'phone',
+        message: 'Phone number must contain 10 to 15 digits'
+      }
+    };
+  }
+
+  if (!isValidPhoneNumber(normalized.emergencyPhone)) {
+    return {
+      normalized,
+      error: {
+        field: 'emergencyPhone',
+        message: 'Emergency contact phone must contain 10 to 15 digits'
+      }
+    };
+  }
+
+  if (requireFingerprint && !isRealFingerprintId(normalized.fingerprintId)) {
+    return {
+      normalized,
+      error: {
+        field: 'fingerprintId',
+        message: 'Fingerprint enrollment must be completed before registration'
+      }
+    };
+  }
+
+  return {
+    normalized,
+    error: null
+  };
+};
+
 let transactionSupportCache = null;
 
 const environmentSupportsTransactions = async () => {
@@ -146,8 +252,7 @@ const environmentSupportsTransactions = async () => {
   return transactionSupportCache;
 };
 
-const shouldCleanupFingerprint = (fingerprintId) =>
-  Boolean(fingerprintId && !`${fingerprintId}`.startsWith('SKIPPED-'));
+const shouldCleanupFingerprint = (fingerprintId) => isRealFingerprintId(fingerprintId);
 
 const cleanupFingerprintEnrollment = async (fingerprintId) => {
   if (!shouldCleanupFingerprint(fingerprintId)) {
@@ -205,7 +310,9 @@ const buildPatientSummary = (patient) => ({
   govtId: patient.govtId,
   dob: patient.dob,
   nfcId: patient.nfcUuid,
+  fingerprintId: patient.fingerprintId,
   phone: patient.phone,
+  address: patient.address,
   age: patient.age,
   gender: patient.gender,
   bloodGroup: patient.bloodGroup,
@@ -229,6 +336,12 @@ const buildRegistrationConflict = (field) => {
         message: 'This NFC card is already linked to another patient',
         code: 'PATIENT_NFC_CONFLICT',
         field: 'nfcUuid'
+      };
+    case 'govtId':
+      return {
+        message: 'A patient with this government ID already exists',
+        code: 'PATIENT_GOVT_ID_CONFLICT',
+        field: 'govtId'
       };
     case 'fingerprintId':
       return {
@@ -417,11 +530,14 @@ export const registerPatientByHospital = async (req, res) => {
   try {
     const actorId = getActorId(req);
     const {
+      normalized,
+      error: validationError
+    } = validateHospitalRegistrationInput(req.body, { requireFingerprint: true });
+    const {
       fullName,
       dob,
       gender,
       phone,
-      
       bloodGroup,
       emergencyName,
       emergencyPhone,
@@ -432,9 +548,8 @@ export const registerPatientByHospital = async (req, res) => {
       nfcId,
       govtId,
       address,
-      fingerprintId
-    } = req.body;
-    const normalizedFingerprintId = normalizeFingerprintId(fingerprintId);
+      fingerprintId: normalizedFingerprintId
+    } = normalized;
 
     useTransactions = await environmentSupportsTransactions();
 
@@ -467,11 +582,12 @@ export const registerPatientByHospital = async (req, res) => {
       });
     };
 
-    if (!fullName || !dob || !gender || !phone || !bloodGroup || !nfcId) {
+    if (validationError) {
       return failRegistration(400, {
-        message: 'Full name, DOB, gender, phone, blood group, and NFC ID are required'
+        message: validationError.message,
+        field: validationError.field
       }, {
-        reason: 'missing-required-fields'
+        reason: 'invalid-registration-payload'
       });
     }
 
@@ -513,6 +629,15 @@ export const registerPatientByHospital = async (req, res) => {
     if (existingNfcPatient) {
       return failRegistration(409, buildRegistrationConflict('nfcUuid'), {
         reason: 'nfc-conflict'
+      });
+    }
+
+    const existingGovtIdPatient = useTransactions
+      ? await Patient.findOne({ govtId }).session(session)
+      : await Patient.findOne({ govtId });
+    if (existingGovtIdPatient) {
+      return failRegistration(409, buildRegistrationConflict('govtId'), {
+        reason: 'govt-id-conflict'
       });
     }
 
@@ -642,6 +767,7 @@ export const registerPatientByHospital = async (req, res) => {
       fingerprintId: patient.fingerprintId,
       age: patient.age,
       username: user.username,
+      patient: buildPatientSummary(patient),
       temporaryPasswordHint: isHardwareBridgeConfigured()
         ? 'Sent via SMS to your registered phone'
         : 'Contact hospital admin for temporary password'
@@ -686,6 +812,90 @@ export const registerPatientByHospital = async (req, res) => {
     return res.status(500).json({
       message: 'Server error while registering patient',
       ...cleanupDetails
+    });
+  }
+};
+
+export const validatePatientRegistrationByHospital = async (req, res) => {
+  try {
+    const { normalized, error } = validateHospitalRegistrationInput(req.body, {
+      requireFingerprint: false
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        field: error.field,
+        message: error.message
+      });
+    }
+
+    const age = calculateAge(normalized.dob);
+    if (age === null || age < 0) {
+      return res.status(400).json({
+        success: false,
+        field: 'dob',
+        message: 'A valid date of birth is required'
+      });
+    }
+
+    const parsedHeightCm = parseRequiredPositiveNumber(normalized.heightCm, 'Height (cm)');
+    if (parsedHeightCm.error) {
+      return res.status(400).json({
+        success: false,
+        field: 'heightCm',
+        message: parsedHeightCm.error
+      });
+    }
+
+    const parsedWeightKg = parseRequiredPositiveNumber(normalized.weightKg, 'Weight (kg)');
+    if (parsedWeightKg.error) {
+      return res.status(400).json({
+        success: false,
+        field: 'weightKg',
+        message: parsedWeightKg.error
+      });
+    }
+
+    const existingPhonePatient = await Patient.findOne({ phone: normalized.phone });
+    if (existingPhonePatient) {
+      return res.status(409).json({
+        success: false,
+        ...buildRegistrationConflict('phone')
+      });
+    }
+
+    const existingGovtIdPatient = await Patient.findOne({ govtId: normalized.govtId });
+    if (existingGovtIdPatient) {
+      return res.status(409).json({
+        success: false,
+        ...buildRegistrationConflict('govtId')
+      });
+    }
+
+    const existingNfcPatient = await Patient.findOne({ nfcUuid: normalized.nfcId });
+    if (existingNfcPatient) {
+      return res.status(409).json({
+        success: false,
+        ...buildRegistrationConflict('nfcUuid')
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Registration data validated successfully',
+      normalized: {
+        ...normalized,
+        age,
+        heightCm: parsedHeightCm.value,
+        weightKg: parsedWeightKg.value
+      }
+    });
+  } catch (error) {
+    console.error('Registration validation error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while validating registration data'
     });
   }
 };

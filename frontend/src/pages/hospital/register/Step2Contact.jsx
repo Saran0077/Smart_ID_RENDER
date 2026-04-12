@@ -1,14 +1,35 @@
+import { useEffect, useState } from "react";
 import { usePatientRegistration } from "../../../context/PatientRegistrationContext";
 import { useNavigate } from "react-router-dom";
 
 export default function Step2Contact() {
-    const { data, update } = usePatientRegistration();
+    const { data, updateSection, markStepComplete, canAccessStep, getFirstIncompleteStepPath } = usePatientRegistration();
     const navigate = useNavigate();
+    const [error, setError] = useState("");
+
+    useEffect(() => {
+        if (!canAccessStep("contact")) {
+            navigate(getFirstIncompleteStepPath(), { replace: true });
+        }
+    }, [canAccessStep, getFirstIncompleteStepPath, navigate]);
 
     const submit = (e) => {
         e.preventDefault();
         const formData = new FormData(e.target);
-        update("contact", Object.fromEntries(formData.entries()));
+        const values = Object.fromEntries(formData.entries());
+
+        if (!values.phone?.trim() || !values.address?.trim() || !values.emergencyName?.trim() || !values.emergencyPhone?.trim()) {
+            setError("Complete all contact details before continuing.");
+            return;
+        }
+
+        updateSection("contact", {
+            phone: values.phone.trim(),
+            address: values.address.trim(),
+            emergencyName: values.emergencyName.trim(),
+            emergencyPhone: values.emergencyPhone.trim(),
+        });
+        markStepComplete("contact", true);
         navigate("/hospital/register/medical");
     };
 
@@ -24,6 +45,11 @@ export default function Step2Contact() {
             </div>
 
             <form onSubmit={submit} className="space-y-4">
+                {error && (
+                    <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+                        {error}
+                    </p>
+                )}
                 <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-500 uppercase">Phone Number</label>
                     <input
@@ -32,6 +58,17 @@ export default function Step2Contact() {
                         defaultValue={data.contact.phone}
                         placeholder="+1 (555) 000-0000"
                         className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                        required
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase">Address</label>
+                    <textarea
+                        name="address"
+                        defaultValue={data.contact.address}
+                        placeholder="Enter patient address"
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 focus:ring-2 focus:ring-emerald-500 outline-none transition-all min-h-[96px]"
                         required
                     />
                 </div>

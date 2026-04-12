@@ -33,6 +33,8 @@ const patientSchema = new mongoose.Schema(
     govtId: {
       type: String,
       trim: true,
+      unique: true,
+      sparse: true,
       default: null
     },
 

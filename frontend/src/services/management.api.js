@@ -7,6 +7,10 @@ const managementApi = {
         const res = await api.post("/patient/register", payload);
         return res.data;
     },
+    validatePatientRegistration: async (payload) => {
+        const res = await api.post("/patient/register/validate", payload);
+        return res.data;
+    },
 
     // Patient Session & NFC
     getPatientByNfc: async (nfcId) => {
