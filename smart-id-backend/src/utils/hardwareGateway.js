@@ -47,7 +47,11 @@ export const callHardwareBridge = async (path, options = {}) => {
     if (!response.ok) {
       const message = typeof payload === 'string'
         ? payload
-        : payload?.message || `Hardware bridge request failed with status ${response.status}`;
+        : payload?.message ||
+          payload?.error ||
+          payload?.details ||
+          payload?.reason ||
+          `Hardware bridge request failed with status ${response.status}`;
       const error = new Error(message);
       error.status = response.status;
       error.payload = payload;
