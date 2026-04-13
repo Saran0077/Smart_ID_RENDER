@@ -281,6 +281,54 @@ def delete_fingerprint(fingerprint_id):
             "error": result.get("error", "Failed to delete fingerprint")
         }), 400
 
+@app.route("/fingerprint/verify", methods=["POST"])
+@verify_bridge_auth
+def verify_fingerprint():
+    with fingerprint_lock:
+        data = request.get_json() or {}
+        expected_fingerprint_id = (
+            data.get("fingerprintId") or
+            data.get("finger_id") or
+            data.get("fingerId")
+        )
+
+        try:
+            expected_fingerprint_id = int(expected_fingerprint_id) if expected_fingerprint_id is not None else None
+        except (TypeError, ValueError):
+            return jsonify({
+                "verified": False,
+                "error": "Invalid fingerprint ID",
+                "message": "Fingerprint ID must be numeric"
+            }), 400
+
+        result = fingerprint.verify(expected_fingerprint_id)
+
+        if result.get("verified"):
+            return jsonify({
+                "success": True,
+                "verified": True,
+                "fingerprintId": result.get("fingerprintId"),
+                "message": result.get("message", "Fingerprint verified successfully")
+            })
+
+        status_code = 401 if result.get("status") in {"mismatch", "not_found"} else 400
+        if result.get("status") == "waiting":
+            status_code = 408
+
+        return jsonify({
+            "success": False,
+            "verified": False,
+            "status": result.get("status"),
+            "fingerprintId": result.get("fingerprintId") or result.get("foundId"),
+            "error": result.get("error"),
+            "message": result.get("message", "Fingerprint verification failed")
+        }), status_code
+
+@app.route("/verify-fingerprint", methods=["POST"])
+@verify_bridge_auth
+def verify_fingerprint_alias():
+    return verify_fingerprint()
+
 @app.route("/send-sms", methods=["POST"])
 @verify_bridge_auth
 def send_sms():

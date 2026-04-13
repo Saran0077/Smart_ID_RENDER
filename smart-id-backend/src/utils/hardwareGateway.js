@@ -3,6 +3,28 @@ const hardwareBridgeKey = process.env.HARDWARE_BRIDGE_KEY;
 
 const HARDWARE_TIMEOUT = 45000; // 45 seconds - matches frontend timeout
 
+const looksLikeHtml = (value) => typeof value === 'string' && /<!doctype html>|<html[\s>]/i.test(value);
+
+const normalizeBridgeErrorMessage = (payload, status) => {
+  if (typeof payload === 'string') {
+    if (looksLikeHtml(payload)) {
+      if (status === 404) {
+        return 'Hardware bridge endpoint not found. Verify the Raspberry Pi server routes and deployment version.';
+      }
+
+      return `Hardware bridge returned an unexpected HTML error page${status ? ` (status ${status})` : ''}.`;
+    }
+
+    return payload;
+  }
+
+  return payload?.message ||
+    payload?.error ||
+    payload?.details ||
+    payload?.reason ||
+    `Hardware bridge request failed with status ${status}`;
+};
+
 const buildHeaders = () => {
   const headers = {
     'Content-Type': 'application/json'
@@ -45,13 +67,7 @@ export const callHardwareBridge = async (path, options = {}) => {
       : await response.text();
 
     if (!response.ok) {
-      const message = typeof payload === 'string'
-        ? payload
-        : payload?.message ||
-          payload?.error ||
-          payload?.details ||
-          payload?.reason ||
-          `Hardware bridge request failed with status ${response.status}`;
+      const message = normalizeBridgeErrorMessage(payload, response.status);
       const error = new Error(message);
       error.status = response.status;
       error.payload = payload;

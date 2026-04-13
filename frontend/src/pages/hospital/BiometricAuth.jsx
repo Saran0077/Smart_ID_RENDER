@@ -3,6 +3,26 @@ import { useNavigate, Navigate } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import hospitalAPI from "../../services/management.api";
 
+const normalizeBiometricError = (err) => {
+    const backendMessage = err?.response?.data?.message || err?.response?.data?.error;
+    const fallbackMessage = err?.message || "Biometric sensor timeout or hardware error.";
+    const rawMessage = backendMessage || fallbackMessage;
+
+    if (typeof rawMessage === "string" && /<!doctype html>|<html[\s>]/i.test(rawMessage)) {
+        return "Fingerprint verification service route was not found on the hardware bridge. Please check the Raspberry Pi server deployment.";
+    }
+
+    if (err?.response?.status === 404) {
+        return "Fingerprint verification service is unavailable. Please verify the hardware bridge routes and try again.";
+    }
+
+    if (err?.response?.status === 408) {
+        return "No finger detected. Place the patient's finger on the scanner and try again.";
+    }
+
+    return rawMessage;
+};
+
 export default function BiometricAuth() {
     const navigate = useNavigate();
     const { patient, otpVerified, authMethod, setFingerprintVerified } = useSession();
@@ -42,7 +62,7 @@ export default function BiometricAuth() {
             }
         } catch (err) {
             setScanStatus("FAIL");
-            setError(err.response?.data?.message || "Biometric sensor timeout or hardware error.");
+            setError(normalizeBiometricError(err));
         } finally {
             setIsVerifying(false);
         }

@@ -133,31 +133,51 @@ export const linkNfcCard = async (req, res) => {
 // 2️⃣ Verify Fingerprint (from Raspberry Pi)
 export const verifyFingerprint = async (req, res) => {
   try {
-    const { finger_id, patientId, uid } = req.body;
+    const { finger_id, fingerprintId, patientId, uid } = req.body;
 
     if (isHardwareBridgeConfigured()) {
+      let expectedFingerprintId = fingerprintId ?? finger_id ?? null;
+
+      if (!expectedFingerprintId && patientId) {
+        const patient = await Patient.findById(patientId).select('fingerprintId fullName');
+
+        if (!patient) {
+          return res.status(404).json({ message: 'Patient not found' });
+        }
+
+        if (!patient.fingerprintId) {
+          return res.status(400).json({ message: 'Patient does not have an enrolled fingerprint' });
+        }
+
+        expectedFingerprintId = patient.fingerprintId;
+      }
+
       const hardwareResponse = await callHardwareBridge('/fingerprint/verify', {
         method: 'POST',
-        body: req.body
+        body: {
+          fingerprintId: expectedFingerprintId
+        }
       });
 
       return res.json({
         success: Boolean(hardwareResponse?.verified),
         verified: Boolean(hardwareResponse?.verified),
         patientId: hardwareResponse?.patientId || patientId || null,
-        fingerId: hardwareResponse?.fingerId || hardwareResponse?.finger_id || null,
+        fingerId: hardwareResponse?.fingerprintId || hardwareResponse?.fingerId || hardwareResponse?.finger_id || expectedFingerprintId || null,
         uid: hardwareResponse?.uid || uid || null,
         message: hardwareResponse?.message || 'Fingerprint verification completed'
       });
     }
 
-    if (finger_id === undefined) {
+    const resolvedFingerprintId = fingerprintId ?? finger_id;
+
+    if (resolvedFingerprintId === undefined) {
       return res.status(400).json({ message: 'Fingerprint ID is required when no hardware bridge is configured' });
     }
 
     const patientQuery = patientId
-      ? { _id: patientId, fingerprintId: finger_id }
-      : { fingerprintId: finger_id };
+      ? { _id: patientId, fingerprintId: resolvedFingerprintId }
+      : { fingerprintId: resolvedFingerprintId };
 
     const patient = await Patient.findOne(patientQuery);
 
