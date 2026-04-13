@@ -28,6 +28,22 @@ const buildRegistrationPayload = (registrationData, fingerprintId = null) => {
     };
 };
 
+const extractFingerprintId = (payload) => {
+    if (!payload || typeof payload !== "object") {
+        return null;
+    }
+
+    return (
+        payload.fingerprintId ||
+        payload.fingerId ||
+        payload.finger_id ||
+        payload.enrollment?.fingerprintId ||
+        payload.enrollment?.fingerId ||
+        payload.enrollment?.finger_id ||
+        null
+    );
+};
+
 const getRegistrationFailureDetails = (error) => {
     const responseData = error.response?.data || {};
     const cleanupAttempted = Boolean(responseData.fingerprintCleanupAttempted);
@@ -306,11 +322,11 @@ export default function Step4FingerAuth() {
                     }
 
                     if (statusResponse.completed || step === "completed") {
-                        let finalizedFingerprintId = statusResponse.fingerprintId || statusResponse.enrollment?.fingerprintId;
+                        let finalizedFingerprintId = extractFingerprintId(statusResponse);
 
                         try {
                             const completeResponse = await hospitalAPI.completeFingerprintEnrollment();
-                            finalizedFingerprintId = completeResponse?.fingerprintId || finalizedFingerprintId;
+                            finalizedFingerprintId = extractFingerprintId(completeResponse) || finalizedFingerprintId;
                         } catch (completeErr) {
                             console.warn("Complete enrollment fallback used:", completeErr.response?.data?.message || completeErr.message);
                         }

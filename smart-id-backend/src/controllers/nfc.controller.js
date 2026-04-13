@@ -3,6 +3,22 @@ import Otp from '../models/Otp.js';
 import { callHardwareBridge, isHardwareBridgeConfigured, pollHardwareBridge, pollHardwareBridgeForLink } from '../utils/hardwareGateway.js';
 import { logAudit } from '../utils/auditLogger.js';
 
+const extractFingerprintId = (payload) => {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  return (
+    payload.fingerprintId ||
+    payload.fingerId ||
+    payload.finger_id ||
+    payload.enrollment?.fingerprintId ||
+    payload.enrollment?.fingerId ||
+    payload.enrollment?.finger_id ||
+    null
+  );
+};
+
 // 1️⃣ Handle NFC Card Tap (from Raspberry Pi)
 export const handleNfcScan = async (req, res) => {
   try {
@@ -302,7 +318,7 @@ export const enrollFingerprint = async (req, res) => {
         body: { patientId }
       });
 
-      fingerId = hardwareResponse?.finger_id || hardwareResponse?.fingerId;
+      fingerId = extractFingerprintId(hardwareResponse);
 
       if (!fingerId) {
         return res.status(500).json({
@@ -328,7 +344,7 @@ export const enrollFingerprint = async (req, res) => {
         body: { patientId: null }
       });
 
-      fingerId = hardwareResponse?.finger_id || hardwareResponse?.fingerId;
+      fingerId = extractFingerprintId(hardwareResponse);
 
       if (!fingerId) {
         return res.status(500).json({
@@ -449,7 +465,7 @@ export const getFingerprintEnrollmentStatus = async (req, res) => {
       substep: hardwareResponse?.substep,
       completed: hardwareResponse?.completed,
       failed: hardwareResponse?.failed,
-      fingerprintId: hardwareResponse?.fingerprintId,
+      fingerprintId: extractFingerprintId(hardwareResponse),
       enrollment: hardwareResponse?.enrollment,
       message: hardwareResponse?.message,
       timeout: hardwareResponse?.timeout,
@@ -490,7 +506,7 @@ export const completeFingerprintEnrollment = async (req, res) => {
 
     res.json({
       success: true,
-      fingerprintId: hardwareResponse?.fingerprintId,
+      fingerprintId: extractFingerprintId(hardwareResponse),
       message: "Enrollment completed successfully"
     });
 
