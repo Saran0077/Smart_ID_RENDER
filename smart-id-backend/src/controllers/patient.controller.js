@@ -323,6 +323,75 @@ const buildPatientSummary = (patient) => ({
   emergencyContact: patient.emergencyContact
 });
 
+const normalizeComparableText = (value) => normalizeText(value).toLowerCase();
+
+const normalizeComparableDate = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return '';
+  }
+
+  return parsedDate.toISOString().slice(0, 10);
+};
+
+const patientMatchesRegistrationPayload = (patient, normalized) => {
+  if (!patient || !normalized) {
+    return false;
+  }
+
+  return (
+    normalizeComparableText(patient.fullName) === normalizeComparableText(normalized.fullName) &&
+    normalizeComparableDate(patient.dob) === normalizeComparableDate(normalized.dob) &&
+    normalizeText(patient.phone) === normalizeText(normalized.phone) &&
+    normalizeText(patient.nfcUuid) === normalizeText(normalized.nfcId) &&
+    normalizeGovtId(patient.govtId) === normalizeGovtId(normalized.govtId) &&
+    normalizeComparableText(patient.gender) === normalizeComparableText(normalized.gender)
+  );
+};
+
+const findMatchingRegisteredPatient = async (normalized, { session = null, useTransactions = false } = {}) => {
+  const lookupClauses = [
+    normalized.phone ? { phone: normalized.phone } : null,
+    normalized.govtId ? { govtId: normalized.govtId } : null,
+    normalized.nfcId ? { nfcUuid: normalized.nfcId } : null
+  ].filter(Boolean);
+
+  if (lookupClauses.length === 0) {
+    return null;
+  }
+
+  let query = Patient.findOne({ $or: lookupClauses }).populate('user', 'username');
+  if (useTransactions && session) {
+    query = query.session(session);
+  }
+
+  const existingPatient = await query;
+  return patientMatchesRegistrationPayload(existingPatient, normalized) ? existingPatient : null;
+};
+
+const buildHospitalRegistrationResponse = (patient, user, { alreadyRegistered = false } = {}) => ({
+  message: alreadyRegistered
+    ? 'Patient already registered. Reusing the existing record.'
+    : 'Patient registered successfully',
+  patientId: patient._id,
+  fullName: patient.fullName,
+  nfcId: patient.nfcUuid,
+  fingerprintId: patient.fingerprintId,
+  age: patient.age,
+  username: user?.username || patient.user?.username || null,
+  patient: buildPatientSummary(patient),
+  alreadyRegistered,
+  temporaryPasswordHint: alreadyRegistered
+    ? 'Existing patient account reused'
+    : isHardwareBridgeConfigured()
+      ? 'Sent via SMS to your registered phone'
+      : 'Contact hospital admin for temporary password'
+});
+
 const buildRegistrationConflict = (field) => {
   switch (field) {
     case 'phone':
@@ -764,6 +833,24 @@ export const registerPatientByHospital = async (req, res) => {
       });
     }
 
+    const matchingPatient = await findMatchingRegisteredPatient(normalized, {
+      session,
+      useTransactions
+    });
+    if (matchingPatient) {
+      if (session) {
+        await session.abortTransaction();
+        session.endSession();
+        session = null;
+      }
+
+      return res.status(200).json(
+        buildHospitalRegistrationResponse(matchingPatient, matchingPatient.user, {
+          alreadyRegistered: true
+        })
+      );
+    }
+
     const existingPhonePatient = useTransactions
       ? await Patient.findOne({ phone }).session(session)
       : await Patient.findOne({ phone });
@@ -909,19 +996,7 @@ export const registerPatientByHospital = async (req, res) => {
       }
     }
 
-    res.status(201).json({
-      message: 'Patient registered successfully',
-      patientId: patient._id,
-      fullName: patient.fullName,
-      nfcId: patient.nfcUuid,
-      fingerprintId: patient.fingerprintId,
-      age: patient.age,
-      username: user.username,
-      patient: buildPatientSummary(patient),
-      temporaryPasswordHint: isHardwareBridgeConfigured()
-        ? 'Sent via SMS to your registered phone'
-        : 'Contact hospital admin for temporary password'
-    });
+    res.status(201).json(buildHospitalRegistrationResponse(patient, user));
   } catch (error) {
     if (session) {
       await session.abortTransaction();
@@ -948,6 +1023,32 @@ export const registerPatientByHospital = async (req, res) => {
     });
     if (isDuplicateKeyError(error)) {
       const normalizedPayloadFingerprintId = normalizeFingerprintId(req.body.fingerprintId);
+      const matchingPatient = await findMatchingRegisteredPatient({
+        fullName: normalizeText(req.body.fullName),
+        dob: req.body.dob,
+        gender: normalizeText(req.body.gender).toLowerCase(),
+        phone: normalizePhoneNumber(req.body.phone),
+        bloodGroup: normalizeText(req.body.bloodGroup),
+        emergencyName: normalizeText(req.body.emergencyName),
+        emergencyPhone: normalizePhoneNumber(req.body.emergencyPhone),
+        allergies: req.body.allergies,
+        surgeries: req.body.surgeries,
+        heightCm: req.body.heightCm,
+        weightKg: req.body.weightKg,
+        nfcId: normalizeText(req.body.nfcId),
+        govtId: normalizeGovtId(req.body.govtId),
+        address: normalizeText(req.body.address),
+        fingerprintId: normalizedPayloadFingerprintId
+      });
+
+      if (matchingPatient) {
+        return res.status(200).json(
+          buildHospitalRegistrationResponse(matchingPatient, matchingPatient.user, {
+            alreadyRegistered: true
+          })
+        );
+      }
+
       const duplicateFieldFromError = inferDuplicateField(error);
       const duplicateField = duplicateFieldFromError === 'unknown'
         ? await resolveDuplicateFieldByLookup({
@@ -1018,6 +1119,22 @@ export const validatePatientRegistrationByHospital = async (req, res) => {
         success: false,
         field: 'weightKg',
         message: parsedWeightKg.error
+      });
+    }
+
+    const matchingPatient = await findMatchingRegisteredPatient(normalized);
+    if (matchingPatient) {
+      return res.json({
+        success: true,
+        ...buildHospitalRegistrationResponse(matchingPatient, matchingPatient.user, {
+          alreadyRegistered: true
+        }),
+        normalized: {
+          ...normalized,
+          age,
+          heightCm: parsedHeightCm.value,
+          weightKg: parsedWeightKg.value
+        }
       });
     }
 

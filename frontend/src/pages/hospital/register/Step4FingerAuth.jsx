@@ -71,6 +71,16 @@ const getRegistrationFailureDetails = (error) => {
     };
 };
 
+const buildExistingRegistrationResult = (response, registrationData) => ({
+    ...response,
+    fingerprintEnrolled: Boolean(response?.fingerprintId),
+    patientName:
+        response?.patient?.fullName ||
+        response?.fullName ||
+        registrationData.personal?.fullName ||
+        "",
+});
+
 export default function Step4FingerAuth() {
     const navigate = useNavigate();
     const {
@@ -285,7 +295,21 @@ export default function Step4FingerAuth() {
         updateValue("registrationResult", null);
 
         try {
-            await hospitalAPI.validatePatientRegistration(buildRegistrationPayload(data));
+            const validationResponse = await hospitalAPI.validatePatientRegistration(buildRegistrationPayload(data));
+
+            if (validationResponse?.alreadyRegistered) {
+                const existingRegistrationResult = buildExistingRegistrationResult(validationResponse, data);
+                const existingFingerprintId = validationResponse?.fingerprintId || validationResponse?.patient?.fingerprintId || null;
+
+                setFingerId(existingFingerprintId);
+                updateValue("fingerprintId", existingFingerprintId);
+                updateValue("patientId", validationResponse.patientId);
+                updateValue("registrationResult", existingRegistrationResult);
+                markStepComplete("fingerprint", true);
+                setRegistrationResult(existingRegistrationResult);
+                setEnrollmentState(STATES.SUCCESS);
+                return;
+            }
 
             const response = await hospitalAPI.startFingerprintEnrollment();
 
@@ -436,6 +460,7 @@ export default function Step4FingerAuth() {
         handleEnrollmentComplete,
         handleEnrollmentFailure,
         resetOperationGuards,
+        markStepComplete,
         setEnrollmentState,
         startCountdown,
         updateValue
