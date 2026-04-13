@@ -230,7 +230,8 @@ export default function Step4FingerAuth() {
                     phone: "phone number",
                     nfcUuid: "NFC card",
                     fingerprintId: "fingerprint",
-                    username: "patient username"
+                    username: "patient username",
+                    user: "patient account"
                 };
 
                 setRegistrationConflict({

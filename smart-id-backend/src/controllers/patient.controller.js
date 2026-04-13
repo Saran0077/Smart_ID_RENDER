@@ -357,7 +357,7 @@ const buildRegistrationConflict = (field) => {
       };
     default:
       return {
-        message: 'Duplicate value found',
+        message: 'Duplicate value found. Please verify phone number, government ID, NFC card, and fingerprint.',
         code: 'PATIENT_DUPLICATE_CONFLICT',
         field: field || 'unknown'
       };
@@ -447,6 +447,37 @@ const extractDuplicateValue = (error, field) => {
   }
 
   return null;
+};
+
+const resolveDuplicateFieldByLookup = async ({ phone, govtId, nfcId, fingerprintId, createdUserId, useTransactions, session }) => {
+  const readWithSession = (query) => (useTransactions && session ? query.session(session) : query);
+
+  if (fingerprintId) {
+    const existingFingerprintPatient = await readWithSession(Patient.findOne({ fingerprintId }));
+    if (existingFingerprintPatient) return 'fingerprintId';
+  }
+
+  if (nfcId) {
+    const existingNfcPatient = await readWithSession(Patient.findOne({ nfcUuid: nfcId }));
+    if (existingNfcPatient) return 'nfcUuid';
+  }
+
+  if (govtId) {
+    const existingGovtIdPatient = await readWithSession(Patient.findOne({ govtId }));
+    if (existingGovtIdPatient) return 'govtId';
+  }
+
+  if (phone) {
+    const existingPhonePatient = await readWithSession(Patient.findOne({ phone }));
+    if (existingPhonePatient) return 'phone';
+  }
+
+  if (createdUserId) {
+    const existingUserPatient = await readWithSession(Patient.findOne({ user: createdUserId }));
+    if (existingUserPatient) return 'user';
+  }
+
+  return 'unknown';
 };
 
 const isDuplicateKeyError = (error) => {
@@ -916,7 +947,19 @@ export const registerPatientByHospital = async (req, res) => {
       ...cleanupDetails
     });
     if (isDuplicateKeyError(error)) {
-      const duplicateField = inferDuplicateField(error);
+      const normalizedPayloadFingerprintId = normalizeFingerprintId(req.body.fingerprintId);
+      const duplicateFieldFromError = inferDuplicateField(error);
+      const duplicateField = duplicateFieldFromError === 'unknown'
+        ? await resolveDuplicateFieldByLookup({
+          phone: normalizePhoneNumber(req.body.phone),
+          govtId: normalizeGovtId(req.body.govtId),
+          nfcId: normalizeText(req.body.nfcId),
+          fingerprintId: normalizedPayloadFingerprintId,
+          createdUserId,
+          useTransactions,
+          session
+        })
+        : duplicateFieldFromError;
       const duplicateValue = extractDuplicateValue(error, duplicateField);
       return res.status(409).json({ 
         ...buildRegistrationConflict(duplicateField),
