@@ -349,6 +349,12 @@ const buildRegistrationConflict = (field) => {
         code: 'PATIENT_FINGERPRINT_CONFLICT',
         field: 'fingerprintId'
       };
+    case 'user':
+      return {
+        message: 'A patient account for this registration already exists',
+        code: 'PATIENT_ACCOUNT_CONFLICT',
+        field: 'user'
+      };
     default:
       return {
         message: 'Duplicate value found',
@@ -359,24 +365,116 @@ const buildRegistrationConflict = (field) => {
 };
 
 const inferDuplicateField = (error) => {
-  const keyPatternField = Object.keys(error?.keyPattern || {})[0];
-  if (keyPatternField) {
-    return keyPatternField;
+  const normalizeFieldFromIndexName = (indexName = '') => {
+    if (!indexName) return null;
+
+    const plainIndex = `${indexName}`
+      .replace(/^[^.]*\./, '')
+      .replace(/\$+/g, '')
+      .replace(/_(?:-?\d+)(?:_|$).*/, '')
+      .trim();
+
+    if (!plainIndex) return null;
+    if (plainIndex.includes('fingerprint')) return 'fingerprintId';
+    if (plainIndex.includes('nfc')) return 'nfcUuid';
+    if (plainIndex.includes('govt')) return 'govtId';
+    if (plainIndex.includes('phone')) return 'phone';
+    if (plainIndex.includes('username')) return 'username';
+    if (plainIndex.includes('user')) return 'user';
+    return plainIndex;
+  };
+
+  const candidates = [
+    error,
+    error?.errorResponse,
+    error?.cause,
+    error?.originalError,
+    error?.writeErrors?.[0],
+    error?.writeErrors?.[0]?.err,
+    error?.result?.writeErrors?.[0],
+    error?.result?.writeErrors?.[0]?.err
+  ];
+
+  for (const candidate of candidates) {
+    const keyPatternField = Object.keys(candidate?.keyPattern || {})[0];
+    if (keyPatternField) return keyPatternField;
+
+    const keyValueField = Object.keys(candidate?.keyValue || {})[0];
+    if (keyValueField) return keyValueField;
   }
 
-  const keyValueField = Object.keys(error?.keyValue || {})[0];
-  if (keyValueField) {
-    return keyValueField;
+  const duplicateMessage = candidates
+    .map((candidate) => candidate?.message || candidate?.errmsg)
+    .filter(Boolean)
+    .join(' | ');
+
+  const indexMatch = duplicateMessage.match(/index:\s*([^\s]+)\s*dup key/i);
+  const indexField = normalizeFieldFromIndexName(indexMatch?.[1]);
+  if (indexField) {
+    return indexField;
   }
 
-  const duplicateMessage = `${error?.message || error?.errmsg || ""}`;
-  if (duplicateMessage.includes("govtId")) return "govtId";
-  if (duplicateMessage.includes("phone")) return "phone";
-  if (duplicateMessage.includes("nfcUuid")) return "nfcUuid";
-  if (duplicateMessage.includes("fingerprintId")) return "fingerprintId";
-  if (duplicateMessage.includes("username")) return "username";
+  if (duplicateMessage.includes('govtId')) return 'govtId';
+  if (duplicateMessage.includes('phone')) return 'phone';
+  if (duplicateMessage.includes('nfcUuid')) return 'nfcUuid';
+  if (duplicateMessage.includes('fingerprintId')) return 'fingerprintId';
+  if (duplicateMessage.includes('username')) return 'username';
+  if (duplicateMessage.includes(' user_1 ')) return 'user';
 
-  return "unknown";
+  return 'unknown';
+};
+
+const extractDuplicateValue = (error, field) => {
+  if (!field || field === 'unknown') {
+    return null;
+  }
+
+  const candidates = [
+    error,
+    error?.errorResponse,
+    error?.cause,
+    error?.originalError,
+    error?.writeErrors?.[0],
+    error?.writeErrors?.[0]?.err,
+    error?.result?.writeErrors?.[0],
+    error?.result?.writeErrors?.[0]?.err
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate?.keyValue && Object.prototype.hasOwnProperty.call(candidate.keyValue, field)) {
+      return candidate.keyValue[field];
+    }
+  }
+
+  return null;
+};
+
+const isDuplicateKeyError = (error) => {
+  const numericCodes = [
+    error?.code,
+    error?.errorResponse?.code,
+    error?.cause?.code,
+    error?.originalError?.code,
+    error?.writeErrors?.[0]?.code,
+    error?.writeErrors?.[0]?.err?.code
+  ];
+
+  if (numericCodes.some((code) => Number(code) === 11000)) {
+    return true;
+  }
+
+  const mergedMessage = [
+    error?.message,
+    error?.errmsg,
+    error?.errorResponse?.errmsg,
+    error?.writeErrors?.[0]?.errmsg,
+    error?.writeErrors?.[0]?.err?.errmsg
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase();
+
+  return mergedMessage.includes('e11000 duplicate key');
 };
 
 const mapMedicalHistoryEntryToVisit = (entry, patient) => ({
@@ -817,11 +915,12 @@ export const registerPatientByHospital = async (req, res) => {
       fingerprintId: normalizeFingerprintId(req.body.fingerprintId),
       ...cleanupDetails
     });
-    if (error.code === 11000) {
+    if (isDuplicateKeyError(error)) {
       const duplicateField = inferDuplicateField(error);
+      const duplicateValue = extractDuplicateValue(error, duplicateField);
       return res.status(409).json({ 
         ...buildRegistrationConflict(duplicateField),
-        duplicateValue: error?.keyValue?.[duplicateField] ?? null,
+        duplicateValue,
         ...cleanupDetails
       });
     }
