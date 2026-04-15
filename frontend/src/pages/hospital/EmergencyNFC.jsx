@@ -7,7 +7,7 @@ import hospitalAPI from "../../services/management.api";
 
 export default function EmergencyNFC() {
     const navigate = useNavigate();
-    const { patient, setPatient } = useSession();
+    const { patient, mergePatientData } = useSession();
     const { emergency, resetEmergency } = useEmergency();
     const [scanState, setScanState] = useState("idle");
     const [hasStarted, setHasStarted] = useState(false);
@@ -46,8 +46,16 @@ export default function EmergencyNFC() {
             }
 
             const refreshedPatient = scan.patient;
-            setPatient({
+            mergePatientData({
+                ...patient,
                 ...refreshedPatient,
+                emergencyContact: refreshedPatient.emergencyContact || patient.emergencyContact,
+                allergies: refreshedPatient.allergies || patient.allergies,
+                surgeries: refreshedPatient.surgeries || patient.surgeries,
+                address: refreshedPatient.address || patient.address,
+                dob: refreshedPatient.dob || patient.dob,
+                heightCm: refreshedPatient.heightCm || patient.heightCm,
+                weightKg: refreshedPatient.weightKg || patient.weightKg,
                 name: refreshedPatient.name || refreshedPatient.fullName || patient.name,
                 location: refreshedPatient.location || patient.location || "Hospital intake",
             });
@@ -61,7 +69,7 @@ export default function EmergencyNFC() {
             setError(scanError.response?.data?.message || scanError.message || "Emergency NFC verification failed.");
             setScanState("error");
         }
-    }, [navigate, patient, patientId, setPatient, expectedUid]);
+    }, [mergePatientData, navigate, patient, patientId, expectedUid]);
 
     useEffect(() => {
         if (!emergency?.active) return;

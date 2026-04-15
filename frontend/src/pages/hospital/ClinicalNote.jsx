@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { useEmergency } from "../../context/EmergencyContext";
@@ -6,7 +6,7 @@ import hospitalAPI from "../../services/management.api";
 
 export default function ClinicalNote() {
     const navigate = useNavigate();
-    const { patient, otpVerified, fingerprintVerified, authMethod, resetSession } = useSession();
+    const { patient, nomineeInfo, otpVerified, fingerprintVerified, authMethod, resetSession } = useSession();
     const { emergency, resetEmergency } = useEmergency();
     const [note, setNote] = useState("");
     const [vitalSigns, setVitalSigns] = useState({ bp: "", pulse: "", temp: "" });
@@ -14,11 +14,45 @@ export default function ClinicalNote() {
     const [showDemographicsModal, setShowDemographicsModal] = useState(false);
     const [patientDetails, setPatientDetails] = useState(null);
     const [loadingDetails, setLoadingDetails] = useState(false);
+    const [detailsLoadFailed, setDetailsLoadFailed] = useState(false);
 
     const hasPatientConsent = otpVerified && fingerprintVerified && authMethod === "PATIENT";
     const hasNomineeConsent = otpVerified && authMethod === "NOMINEE";
     const canWrite = emergency?.active || hasPatientConsent || hasNomineeConsent;
     const activePatientId = patient?.id || patient?._id;
+    const sessionDemographics = useMemo(() => ({
+        fullName: patient?.fullName || patient?.name || "N/A",
+        dob: patient?.dob || null,
+        age: patient?.age || null,
+        gender: patient?.gender || null,
+        bloodGroup: patient?.bloodGroup || null,
+        phone: patient?.phone || null,
+        email: patient?.email || null,
+        address: patient?.address || null,
+        heightCm: patient?.heightCm || null,
+        weightKg: patient?.weightKg || null,
+        allergies: Array.isArray(patient?.allergies) ? patient.allergies : [],
+        surgeries: Array.isArray(patient?.surgeries) ? patient.surgeries : [],
+        emergencyContact: patient?.emergencyContact || null,
+        nomineeName: nomineeInfo?.name || patient?.emergencyContact?.name || null
+    }), [nomineeInfo, patient]);
+    const mergedDemographics = useMemo(() => ({
+        ...sessionDemographics,
+        ...(patientDetails || {}),
+        emergencyContact: patientDetails?.emergencyContact || sessionDemographics.emergencyContact,
+        allergies: Array.isArray(patientDetails?.allergies) ? patientDetails.allergies : sessionDemographics.allergies,
+        surgeries: Array.isArray(patientDetails?.surgeries) ? patientDetails.surgeries : sessionDemographics.surgeries,
+        nomineeName: nomineeInfo?.name || patientDetails?.emergencyContact?.name || sessionDemographics.nomineeName
+    }), [nomineeInfo, patientDetails, sessionDemographics]);
+    const hasUsableDemographics = useMemo(() => (
+        Boolean(
+            mergedDemographics.fullName ||
+            mergedDemographics.phone ||
+            mergedDemographics.emergencyContact?.name ||
+            mergedDemographics.emergencyContact?.phone ||
+            activePatientId
+        )
+    ), [activePatientId, mergedDemographics]);
 
     if (!patient || !canWrite) {
         return <Navigate to="/hospital" replace />;
@@ -26,13 +60,22 @@ export default function ClinicalNote() {
 
     const handleViewDemographics = async () => {
         setShowDemographicsModal(true);
+        setDetailsLoadFailed(false);
+
+        if (!activePatientId) {
+            setLoadingDetails(false);
+            setPatientDetails(null);
+            setDetailsLoadFailed(true);
+            return;
+        }
+
         setLoadingDetails(true);
         try {
-            const details = await hospitalAPI.getPatientDetails(patient.id || patient._id);
+            const details = await hospitalAPI.getPatientDetails(activePatientId);
             setPatientDetails(details);
         } catch (err) {
             console.error("Failed to load patient details:", err);
-            setPatientDetails(null);
+            setDetailsLoadFailed(true);
         } finally {
             setLoadingDetails(false);
         }
@@ -224,32 +267,43 @@ export default function ClinicalNote() {
                             </button>
                         </div>
                         <div className="p-6 max-h-[70vh] overflow-y-auto">
-                            {loadingDetails ? (
+                            {loadingDetails && !hasUsableDemographics ? (
                                 <div className="flex items-center justify-center p-12">
                                     <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
                                 </div>
-                            ) : patientDetails ? (
+                            ) : hasUsableDemographics ? (
                                 <div className="space-y-6">
+                                    {loadingDetails && (
+                                        <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/10 dark:text-emerald-300">
+                                            <div className="h-4 w-4 rounded-full border-2 border-emerald-500/30 border-t-emerald-500 animate-spin"></div>
+                                            Refreshing patient details...
+                                        </div>
+                                    )}
+                                    {detailsLoadFailed && !loadingDetails && (
+                                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300">
+                                            Showing available session details because full demographics could not be loaded.
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-2 gap-4">
-                                        <InfoItem label="Full Name" value={patientDetails.fullName} />
-                                        <InfoItem label="Date of Birth" value={patientDetails.dob ? new Date(patientDetails.dob).toLocaleDateString() : 'N/A'} />
-                                        <InfoItem label="Age" value={patientDetails.age ? `${patientDetails.age} years` : 'N/A'} />
-                                        <InfoItem label="Gender" value={patientDetails.gender ? patientDetails.gender.charAt(0).toUpperCase() + patientDetails.gender.slice(1) : 'N/A'} />
-                                        <InfoItem label="Blood Group" value={patientDetails.bloodGroup} />
-                                        <InfoItem label="Phone" value={patientDetails.phone} />
-                                        <InfoItem label="Email" value={patientDetails.email || 'N/A'} />
-                                        <InfoItem label="Address" value={patientDetails.address || 'N/A'} />
-                                        <InfoItem label="Nominee Name" value={patientDetails.emergencyContact?.name || 'N/A'} />
-                                        <InfoItem label="Emergency Contact Name" value={patientDetails.emergencyContact?.name || 'N/A'} />
-                                        <InfoItem label="Emergency Contact Phone" value={patientDetails.emergencyContact?.phone || 'N/A'} />
-                                        <InfoItem label="Height" value={patientDetails.heightCm ? `${patientDetails.heightCm} cm` : 'N/A'} />
-                                        <InfoItem label="Weight" value={patientDetails.weightKg ? `${patientDetails.weightKg} kg` : 'N/A'} />
+                                        <InfoItem label="Full Name" value={mergedDemographics.fullName} />
+                                        <InfoItem label="Date of Birth" value={mergedDemographics.dob ? new Date(mergedDemographics.dob).toLocaleDateString() : 'N/A'} />
+                                        <InfoItem label="Age" value={mergedDemographics.age ? `${mergedDemographics.age} years` : 'N/A'} />
+                                        <InfoItem label="Gender" value={mergedDemographics.gender ? mergedDemographics.gender.charAt(0).toUpperCase() + mergedDemographics.gender.slice(1) : 'N/A'} />
+                                        <InfoItem label="Blood Group" value={mergedDemographics.bloodGroup} />
+                                        <InfoItem label="Phone" value={mergedDemographics.phone} />
+                                        <InfoItem label="Email" value={mergedDemographics.email || 'N/A'} />
+                                        <InfoItem label="Address" value={mergedDemographics.address || 'N/A'} />
+                                        <InfoItem label="Nominee Name" value={mergedDemographics.nomineeName || 'N/A'} />
+                                        <InfoItem label="Emergency Contact Name" value={mergedDemographics.emergencyContact?.name || 'N/A'} />
+                                        <InfoItem label="Emergency Contact Phone" value={mergedDemographics.emergencyContact?.phone || 'N/A'} />
+                                        <InfoItem label="Height" value={mergedDemographics.heightCm ? `${mergedDemographics.heightCm} cm` : 'N/A'} />
+                                        <InfoItem label="Weight" value={mergedDemographics.weightKg ? `${mergedDemographics.weightKg} kg` : 'N/A'} />
                                     </div>
-                                    {patientDetails.allergies && patientDetails.allergies.length > 0 && (
+                                    {mergedDemographics.allergies && mergedDemographics.allergies.length > 0 && (
                                         <div>
                                             <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Allergies</h4>
                                             <div className="flex flex-wrap gap-2">
-                                                {patientDetails.allergies.map((allergy, i) => (
+                                                {mergedDemographics.allergies.map((allergy, i) => (
                                                     <span key={i} className="px-3 py-1 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-sm font-bold border border-red-200 dark:border-red-800">
                                                         {allergy}
                                                     </span>
@@ -257,11 +311,11 @@ export default function ClinicalNote() {
                                             </div>
                                         </div>
                                     )}
-                                    {patientDetails.surgeries && patientDetails.surgeries.length > 0 && (
+                                    {mergedDemographics.surgeries && mergedDemographics.surgeries.length > 0 && (
                                         <div>
                                             <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Surgeries</h4>
                                             <ul className="list-disc list-inside text-sm text-slate-600 dark:text-slate-400">
-                                                {patientDetails.surgeries.map((surgery, i) => (
+                                                {mergedDemographics.surgeries.map((surgery, i) => (
                                                     <li key={i}>{surgery}</li>
                                                 ))}
                                             </ul>

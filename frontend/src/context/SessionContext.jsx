@@ -3,7 +3,7 @@ import { createContext, useContext, useState, useCallback } from "react";
 const SessionContext = createContext(null);
 
 export const SessionProvider = ({ children }) => {
-    const [patient, setPatient] = useState(null);
+    const [patient, setPatientState] = useState(null);
     const [otpVerified, setOtpVerified] = useState(false);
     const [authMethod, setAuthMethod] = useState(null); // "PATIENT" | "NOMINEE"
     const [fingerprintVerified, setFingerprintVerified] = useState(false);
@@ -17,8 +17,20 @@ export const SessionProvider = ({ children }) => {
     const [emergencyBy, setEmergencyBy] = useState(null);
     const [emergencyReason, setEmergencyReason] = useState(null);
 
+    const syncNomineeInfo = useCallback((patientData) => {
+        if (patientData?.emergencyContact) {
+            setNomineeInfo({
+                name: patientData.emergencyContact.name || null,
+                phone: patientData.emergencyContact.phone || null
+            });
+            return;
+        }
+
+        setNomineeInfo(null);
+    }, []);
+
     const startSession = useCallback((patientData) => {
-        setPatient(patientData);
+        setPatientState(patientData);
         setOtpVerified(false);
         setAuthMethod(null);
         setFingerprintVerified(false);
@@ -26,19 +38,24 @@ export const SessionProvider = ({ children }) => {
         setEmergencyBy(null);
         setEmergencyReason(null);
         setSessionStartedAt(new Date().toISOString());
-        setNomineeInfo(null);
-        
-        // Extract nominee info from patient data if available
-        if (patientData?.emergencyContact) {
-            setNomineeInfo({
-                name: patientData.emergencyContact.name || null,
-                phone: patientData.emergencyContact.phone || null
-            });
-        }
-    }, []);
+        syncNomineeInfo(patientData);
+    }, [syncNomineeInfo]);
+
+    const mergePatientData = useCallback((patientData) => {
+        setPatientState((currentPatient) => {
+            const mergedPatient = {
+                ...(currentPatient || {}),
+                ...(patientData || {}),
+                emergencyContact: patientData?.emergencyContact || currentPatient?.emergencyContact || null
+            };
+
+            syncNomineeInfo(mergedPatient);
+            return mergedPatient;
+        });
+    }, [syncNomineeInfo]);
 
     const resetSession = useCallback(() => {
-        setPatient(null);
+        setPatientState(null);
         setOtpVerified(false);
         setAuthMethod(null);
         setFingerprintVerified(false);
@@ -53,6 +70,7 @@ export const SessionProvider = ({ children }) => {
         <SessionContext.Provider value={{
             patient,
             setPatient: startSession,
+            mergePatientData,
             otpVerified,
             setOtpVerified,
             authMethod,
