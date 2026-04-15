@@ -12,6 +12,7 @@ export default function EmergencyNFC() {
     const [scanState, setScanState] = useState("idle");
     const [hasStarted, setHasStarted] = useState(false);
     const [error, setError] = useState(null);
+    const patientId = patient?.id || patient?._id;
     const expectedUid = `${patient?.nfcId || patient?.nfcUuid || patient?.nfc_uid || ""}`.trim();
     const isScanning = scanState === "scanning";
     const isVerified = scanState === "success";
@@ -23,7 +24,7 @@ export default function EmergencyNFC() {
     }, [emergency?.active, navigate]);
 
     const handleEmergencyScan = useCallback(async () => {
-        if (!patient?.id || !expectedUid) {
+        if (!patientId || !expectedUid) {
             const sessionError = "Emergency override requires an active patient session with a linked NFC card.";
             setError(sessionError);
             setScanState("error");
@@ -36,7 +37,7 @@ export default function EmergencyNFC() {
             setHasStarted(true);
             setError(null);
             const scan = await hospitalAPI.verifyEmergencyCard({
-                patientId: patient.id || patient._id,
+                patientId,
                 expectedUid
             });
 
@@ -60,15 +61,15 @@ export default function EmergencyNFC() {
             setError(scanError.response?.data?.message || scanError.message || "Emergency NFC verification failed.");
             setScanState("error");
         }
-    }, [navigate, patient, setPatient, expectedUid]);
+    }, [navigate, patient, patientId, setPatient, expectedUid]);
 
     useEffect(() => {
         if (!emergency?.active) return;
         if (hasStarted) return;
-        if (!patient?.id || !expectedUid) return;
+        if (!patientId || !expectedUid) return;
 
         handleEmergencyScan();
-    }, [emergency?.active, hasStarted, patient?.id, expectedUid, handleEmergencyScan]);
+    }, [emergency?.active, hasStarted, patientId, expectedUid, handleEmergencyScan]);
 
     if (!patient || !emergency?.active) return null;
 
