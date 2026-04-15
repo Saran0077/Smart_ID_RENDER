@@ -239,17 +239,12 @@ export default function ClinicalNote() {
                                         <InfoItem label="Phone" value={patientDetails.phone} />
                                         <InfoItem label="Email" value={patientDetails.email || 'N/A'} />
                                         <InfoItem label="Address" value={patientDetails.address || 'N/A'} />
+                                        <InfoItem label="Nominee Name" value={patientDetails.emergencyContact?.name || 'N/A'} />
+                                        <InfoItem label="Emergency Contact Name" value={patientDetails.emergencyContact?.name || 'N/A'} />
+                                        <InfoItem label="Emergency Contact Phone" value={patientDetails.emergencyContact?.phone || 'N/A'} />
                                         <InfoItem label="Height" value={patientDetails.heightCm ? `${patientDetails.heightCm} cm` : 'N/A'} />
                                         <InfoItem label="Weight" value={patientDetails.weightKg ? `${patientDetails.weightKg} kg` : 'N/A'} />
                                     </div>
-                                    {patientDetails.emergencyContact && (
-                                        <div className="bg-red-50 dark:bg-red-900/20 rounded-2xl p-4 border border-red-200 dark:border-red-800">
-                                            <h4 className="text-sm font-bold text-red-700 dark:text-red-400 mb-2">Emergency Contact</h4>
-                                            <p className="text-sm text-slate-700 dark:text-slate-300">
-                                                {patientDetails.emergencyContact.name} - {patientDetails.emergencyContact.phone}
-                                            </p>
-                                        </div>
-                                    )}
                                     {patientDetails.allergies && patientDetails.allergies.length > 0 && (
                                         <div>
                                             <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Allergies</h4>
