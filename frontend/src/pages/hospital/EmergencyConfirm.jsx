@@ -7,7 +7,7 @@ import hospitalAPI from "../../services/management.api";
 export default function EmergencyConfirm() {
     const navigate = useNavigate();
     const { patient } = useSession();
-    const { setEmergencySession } = useEmergency();
+    const { setEmergencySession, resetEmergency } = useEmergency();
     const [password, setPassword] = useState("");
     const [isVerifying, setIsVerifying] = useState(false);
     const [error, setError] = useState(null);
@@ -91,7 +91,10 @@ export default function EmergencyConfirm() {
 
                         <button
                             type="button"
-                            onClick={() => navigate("/hospital")}
+                            onClick={() => {
+                                resetEmergency();
+                                navigate("/hospital");
+                            }}
                             className="w-full py-4 text-slate-400 font-bold hover:text-slate-600 transition-all text-sm uppercase tracking-widest"
                         >
                             Cancel & Return

@@ -92,6 +92,8 @@ export default function HospitalDashboard() {
                 ...patientData,
                 name: patientData.name || patientData.fullName || 'Unknown Patient',
                 location: patientData.location || 'Hospital intake',
+                nfcId: patientData.nfcId || patientData.nfcUuid || patientData.nfc_uid || normalizedUid,
+                nfcUuid: patientData.nfcUuid || patientData.nfcId || patientData.nfc_uid || normalizedUid,
             });
             setLookupUid(normalizedUid);
             setScannedNfcUid(normalizedUid);

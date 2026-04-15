@@ -8,11 +8,13 @@ import hospitalAPI from "../../services/management.api";
 export default function EmergencyNFC() {
     const navigate = useNavigate();
     const { patient, setPatient } = useSession();
-    const { emergency } = useEmergency();
-    const [isScanning, setIsScanning] = useState(false);
+    const { emergency, resetEmergency } = useEmergency();
+    const [scanState, setScanState] = useState("idle");
     const [hasStarted, setHasStarted] = useState(false);
     const [error, setError] = useState(null);
-    const expectedUid = `${patient?.nfcId || patient?.nfcUuid || ""}`.trim();
+    const expectedUid = `${patient?.nfcId || patient?.nfcUuid || patient?.nfc_uid || ""}`.trim();
+    const isScanning = scanState === "scanning";
+    const isVerified = scanState === "success";
 
     useEffect(() => {
         if (!emergency?.active) {
@@ -24,13 +26,13 @@ export default function EmergencyNFC() {
         if (!patient?.id || !expectedUid) {
             const sessionError = "Emergency override requires an active patient session with a linked NFC card.";
             setError(sessionError);
+            setScanState("error");
             toast.error(sessionError);
-            navigate("/hospital");
             return;
         }
 
         try {
-            setIsScanning(true);
+            setScanState("scanning");
             setHasStarted(true);
             setError(null);
             const scan = await hospitalAPI.verifyEmergencyCard({
@@ -48,7 +50,7 @@ export default function EmergencyNFC() {
                 name: refreshedPatient.name || refreshedPatient.fullName || patient.name,
                 location: refreshedPatient.location || patient.location || "Hospital intake",
             });
-            setIsScanning(false);
+            setScanState("success");
             toast.success("Patient card verified successfully");
             setTimeout(() => {
                 navigate("/hospital/clinical-note");
@@ -56,7 +58,7 @@ export default function EmergencyNFC() {
         } catch (scanError) {
             console.error("Emergency NFC verification failed:", scanError);
             setError(scanError.response?.data?.message || scanError.message || "Emergency NFC verification failed.");
-            setIsScanning(false);
+            setScanState("error");
         }
     }, [navigate, patient, setPatient, expectedUid]);
 
@@ -77,7 +79,7 @@ export default function EmergencyNFC() {
                     <div 
                         className={`mx-auto size-24 bg-red-50 dark:bg-red-950 rounded-3xl flex items-center justify-center mb-8 border border-red-100 dark:border-red-800 relative ${isScanning ? 'animate-pulse' : ''}`}
                     >
-                        <span className={`material-symbols-outlined text-6xl transition-all duration-500 ${isScanning ? 'text-red-500' : 'text-emerald-500'}`}>
+                        <span className={`material-symbols-outlined text-6xl transition-all duration-500 ${isVerified ? 'text-emerald-500' : 'text-red-500'}`}>
                             contactless
                         </span>
                         {isScanning && (
@@ -94,11 +96,16 @@ export default function EmergencyNFC() {
                 </div>
 
                 <div className="px-10 pb-10">
-                    {isScanning ? (
+                    {isVerified ? (
+                        <div className="py-5 bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-500 rounded-2xl flex items-center justify-center gap-3 text-emerald-700 dark:text-emerald-400 font-bold animate-in fade-in zoom-in-95">
+                            <span className="material-symbols-outlined">check_circle</span>
+                            Card Verified. Accessing Records...
+                        </div>
+                    ) : (
                         <div className="flex flex-col items-center gap-4">
-                            <div className="flex items-center gap-2 text-xs font-bold px-6 py-3 bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 rounded-2xl">
-                                <div className="size-2 bg-red-500 rounded-full animate-ping"></div>
-                                {isScanning ? "Waiting for Hardware Tap" : "Ready to Retry Scan"}
+                            <div className={`flex items-center gap-2 text-xs font-bold px-6 py-3 rounded-2xl ${isScanning ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'}`}>
+                                <div className={`size-2 rounded-full ${isScanning ? 'bg-red-500 animate-ping' : 'bg-amber-500'}`}></div>
+                                {isScanning ? "Waiting for Hardware Tap" : error ? "Card Verification Failed" : "Ready to Scan"}
                             </div>
                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
                                 Place the physical card against the Raspberry Pi reader. A live card read is required for emergency access.
@@ -109,18 +116,16 @@ export default function EmergencyNFC() {
                                 disabled={isScanning}
                                 className="px-5 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-60"
                             >
-                                {isScanning ? "Scanning..." : "Start Scan Again"}
+                                {isScanning ? "Scanning..." : hasStarted ? "Try Scan Again" : "Start Scan"}
                             </button>
-                        </div>
-                    ) : (
-                        <div className="py-5 bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-500 rounded-2xl flex items-center justify-center gap-3 text-emerald-700 dark:text-emerald-400 font-bold animate-in fade-in zoom-in-95">
-                            <span className="material-symbols-outlined">check_circle</span>
-                            Card Verified. Accessing Records...
                         </div>
                     )}
 
                     <button
-                        onClick={() => navigate("/hospital")}
+                        onClick={() => {
+                            resetEmergency();
+                            navigate("/hospital");
+                        }}
                         className="w-full mt-6 text-slate-400 font-bold hover:text-red-500 transition-all text-sm uppercase tracking-widest"
                     >
                         Cancel Override
